@@ -12,7 +12,7 @@ La referencia fisica vigente para `CONFIRM_PURCHASE v0.1` es db-4, VALIDADO / CO
 
 ## Estado del diseno
 
-- Estado: PRE-FREEZE / EN AUDITORIA FINAL
+- Estado: VALIDADO / CONGELADO
 - Version: v0.1
 - Implementacion: todavia no iniciada
 
@@ -29,9 +29,9 @@ No define todavia:
 - frontend;
 - aplicacion de escritorio.
 
-## 1. Alcance actual del borrador
+## 1. Alcance del contrato
 
-Este primer borrador cierra para `CONFIRM_PURCHASE v0.1`:
+Este contrato cierra para `CONFIRM_PURCHASE v0.1`:
 
 - identidad;
 - autoridad del `DRAFT`;
@@ -83,12 +83,11 @@ Este primer borrador cierra para `CONFIRM_PURCHASE v0.1`:
 - replay `COMPLETED`;
 - estructura FASE A / FASE B / FASE C completa para el contrato conceptual v0.1.
 
-Este borrador todavia deja abiertos antes del freeze:
+La auditoria integral final queda APROBADA con resultado APTO PARA FREEZE.
 
-- auditoria final integral del documento;
-- freeze definitivo de `CONFIRM_PURCHASE v0.1`.
+No quedan decisiones conceptuales abiertas para `CONFIRM_PURCHASE v0.1`.
 
-Este documento no queda validado ni congelado.
+Este documento queda VALIDADO / CONGELADO como contrato conceptual `CONFIRM_PURCHASE v0.1`.
 
 ## 2. Objetivo de CONFIRM_PURCHASE
 
@@ -2455,7 +2454,7 @@ Debe hacer rollback y devolver error deterministico. El usuario/flujo de edicion
 
 ## 20. Catalogo de errores cerrado hasta este micro-hito
 
-Este borrador define los errores cerrados hasta este micro-hito. Audit, estados finales, idempotencia `COMPLETED` y atomicidad global ya no son dependencias abiertas del catalogo de errores.
+Este contrato define los errores cerrados hasta este micro-hito. Audit, estados finales, idempotencia `COMPLETED` y atomicidad global ya no son dependencias abiertas del catalogo de errores.
 
 Idempotencia:
 
@@ -2591,7 +2590,7 @@ La politica completa de `CANCEL_PURCHASE_DRAFT` queda fuera de este micro-hito.
 
 ## 23. Estados purchase_orders relevantes
 
-Estados relevantes de `purchase_orders` para este borrador:
+Estados relevantes de `purchase_orders` para este contrato:
 
 - `CONFIRMED`: estado requerido para confirmar una `purchase DRAFT`.
 - `CLOSED`: estado historico esperado despues de compra confirmada.
@@ -2610,7 +2609,7 @@ Este documento no redisena `CANCEL_ORDER`.
 | `DRAFT` | `DRAFT` / `CANCELLED` / `CLOSED` | `PURCHASE_ORDER_STATUS_INVALID`. |
 | `CONFIRMED` | distinto de `CLOSED` | Estado inconsistente; no ejecutar efectos y no fingir exito. |
 
-Para `CONFIRM_PURCHASE v0.1`, no crear un error publico adicional para corrupcion/integridad interna. Estos estados se tratan como inconsistencia interna / diagnostico; el contrato v0.1 no define un codigo publico especifico adicional. Esto no queda pendiente antes del freeze. Cualquier codigo publico futuro seria una evolucion posterior del contrato, no un gap de v0.1.
+Para `CONFIRM_PURCHASE v0.1`, no crear un error publico adicional para corrupcion/integridad interna. Estos estados se tratan como inconsistencia interna / diagnostico; el contrato v0.1 no define un codigo publico especifico adicional. Esto no queda pendiente para este contrato congelado. Cualquier codigo publico futuro seria una evolucion posterior del contrato, no un gap de v0.1.
 
 ## 25. Result entity y response_body
 
@@ -2753,7 +2752,7 @@ Debe recuperarse de forma segura:
 
 ## 31. Autorizacion cross-key
 
-Regla definitiva para este borrador:
+Regla definitiva para este contrato:
 
 - SAME TERMINAL KEY: `COMPLETED`/`FAILED` historica conserva su propio contrato.
 - NUEVA KEY o `IN_PROGRESS` recuperable: antes de ejecutar efectos o reconciliar una `purchase` ya confirmada debe validar autorizacion actual.
@@ -3219,7 +3218,7 @@ No ejecutar efectos para arreglar silenciosamente el estado.
 
 No inventar historia.
 
-Documentar como inconsistencia interna / diagnostico que requiere rechazo seguro. `CONFIRM_PURCHASE v0.1` no crea ahora un error publico especifico adicional para corrupcion/integridad interna. Esto no queda pendiente antes del freeze; cualquier codigo publico futuro seria una evolucion posterior del contrato, no un gap de v0.1.
+Documentar como inconsistencia interna / diagnostico que requiere rechazo seguro. `CONFIRM_PURCHASE v0.1` no crea ahora un error publico especifico adicional para corrupcion/integridad interna. Esto no queda pendiente para este contrato congelado; cualquier codigo publico futuro seria una evolucion posterior del contrato, no un gap de v0.1.
 
 ## 37. FASE C - Error deterministico
 
@@ -3424,24 +3423,39 @@ El seed futuro de `PURCHASES_CONFIRM` es configuracion/implementacion futura, no
 
 `PURCHASE_REPLENISHMENT_PREDECESSOR_PENDING` es una condicion de servicio, no un nuevo status fisico.
 
-## 43. Puntos pendientes antes del freeze
+## 43. Cierre del freeze
 
-Antes de congelar `CONFIRM_PURCHASE v0.1`, faltan:
+Estado final de `CONFIRM_PURCHASE v0.1`:
 
-- auditoria final integral del documento;
-- freeze definitivo de `CONFIRM_PURCHASE v0.1`.
+- auditoria integral final: APROBADA;
+- resultado: APTO PARA FREEZE;
+- blockers de freeze: ninguno;
+- gaps fisicos: ninguno;
+- gaps conceptuales relevantes: ninguno;
+- riesgos de concurrencia sin resolver: ninguno;
+- db-5: NO requerido;
+- estado final: VALIDADO / CONGELADO.
 
-No son gaps conceptuales pendientes del contrato:
+No son gaps del contrato conceptual:
 
-- pruebas de concurrencia;
+- pruebas de concurrencia implementadas;
 - API/DTO publico;
 - servicio;
 - repositorio;
-- implementacion.
+- backend;
+- SQL concreto;
+- frontend;
+- aplicacion de escritorio.
 
-Esos puntos son trabajo posterior al contrato documental.
+Esos puntos son trabajo posterior de implementacion.
 
-No quedan como pendientes en este borrador:
+Una vez congelado `CONFIRM_PURCHASE v0.1`:
+
+- no realizar cambios semanticos silenciosos sobre v0.1;
+- cualquier cambio posterior que altere invariantes, formulas, estados, locks, idempotencia, efectos, errores o modelo funcional requiere una nueva version/evolucion documental;
+- correcciones puramente ortograficas/editoriales que no cambien significado pueden tratarse separadamente.
+
+Quedan cerrados en este contrato:
 
 - identidad;
 - fingerprint;
