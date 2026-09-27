@@ -12,7 +12,7 @@ La referencia fisica vigente para `CONFIRM_PURCHASE v0.1` es db-4, VALIDADO / CO
 
 ## Estado del diseno
 
-- Estado: BORRADOR INICIAL
+- Estado: PRE-FREEZE / EN AUDITORIA FINAL
 - Version: v0.1
 - Implementacion: todavia no iniciada
 
@@ -621,7 +621,7 @@ total_received_base =
 ordered_base = purchase_order_items.ordered_qty_base
 ```
 
-Si no existe ninguna `purchase_item` asociada a un `purchase_order_item`, el recibido agregado es `0`. Ese `purchase_order_item` no se omite del procesamiento de `CONFIRM_PURCHASE`: se considera `received_base = 0` y sus reservations se resuelven con `safe_fulfill_now = 0` y la futura regla de release.
+Si no existe ninguna `purchase_item` asociada a un `purchase_order_item`, el recibido agregado es `0`. Ese `purchase_order_item` no se omite del procesamiento de `CONFIRM_PURCHASE`: se considera `received_base = 0` y sus reservations se resuelven con `safe_fulfill_now = 0` y la regla de release definida mas adelante en este contrato.
 
 Si `total_received_base = ordered_base`, no existe diferencia cuantitativa agregada. Si `total_received_base < ordered_base`, existe faltante. Si `total_received_base > ordered_base`, existe excedente respecto de lo pedido. Esto no modifica Politica A de reposicion.
 
@@ -653,20 +653,20 @@ No significa automaticamente:
 fulfilled_qty_base = received_applicable_to_replenishment_base
 ```
 
-El fulfillment agregado real se determina en este contrato con `safe_fulfill_now`, limitado por reservations preexistentes, demanda realmente pendiente, reglas por `sale_item` y devoluciones `RETURN_RESTOCK` posteriores al pedido. La regla definitiva de release se cierra mas adelante como `planned_release_delta = remaining_reserved - planned_fulfill_delta`.
+El fulfillment agregado real se determina en este contrato con `safe_fulfill_now`, limitado por reservations preexistentes, demanda realmente pendiente, reglas por `sale_item` y devoluciones `RETURN_RESTOCK` posteriores al pedido. La regla definitiva de release queda definida mas adelante como `planned_release_delta = remaining_reserved - planned_fulfill_delta`.
 
 La regla no modifica retrospectivamente `purchase_order_items.replenishment_qty_base`, `customer_special_qty_base`, `stock_extra_qty_base` ni `ordered_qty_base`. Tampoco reclasifica `stock_extra` o `customer_special` como replenishment; ambos son motivos non-replenishment para este calculo.
 
 Ejemplos:
 
 - `replenishment = 5`, `stock_extra = 5`, `received = 5` => `received_applicable_to_replenishment_base = 5`.
-- `replenishment = 5`, `stock_extra = 5`, `received = 8` => `received_applicable_to_replenishment_base = 5`; las otras 3 unidades no crean allocations, no cubren demanda FIFO nueva, no aumentan el limite de fulfillment del pedido origen y quedan para el futuro bloque de inventario.
+- `replenishment = 5`, `stock_extra = 5`, `received = 8` => `received_applicable_to_replenishment_base = 5`; las otras 3 unidades no crean allocations, no cubren demanda FIFO nueva, no aumentan el limite de fulfillment del pedido origen y quedan para el bloque de inventario definido mas adelante en este contrato.
 - `replenishment = 5`, `customer_special = 5`, `received = 3` => `received_applicable_to_replenishment_base = 3`.
 - `replenishment = 0`, `stock_extra = 10`, `received = 6` => `received_applicable_to_replenishment_base = 0` y no hay efecto de reposicion por esa linea.
 
 Si `total_received_base = 0`, entonces `received_applicable_to_replenishment_base = 0`. Una `purchase_item` con `purchase_order_item_id IS NULL` no participa en esta formula y conserva la politica de producto no pedido: no crea allocation, no genera fulfillment, no crea `ORDER_RESERVE` y no cubre demanda nueva.
 
-Si una devolucion posterior al pedido redujo la demanda real, esta regla no obliga a fulfillar todo lo recibido aplicable. Ejemplo: `replenishment historico = 5` y `received = 5` establecen `received_applicable_to_replenishment_base = 5`; si por `RETURN_RESTOCK` posterior solo queda demanda real `3`, `safe_fulfill_now` podra determinar `fulfilled <= 3` y la parte no fulfillable se resolvera segun la futura regla de release.
+Si una devolucion posterior al pedido redujo la demanda real, esta regla no obliga a fulfillar todo lo recibido aplicable. Ejemplo: `replenishment historico = 5` y `received = 5` establecen `received_applicable_to_replenishment_base = 5`; si por `RETURN_RESTOCK` posterior solo queda demanda real `3`, `safe_fulfill_now` podra determinar `fulfilled <= 3` y la parte no fulfillable se resolvera segun la regla de release definida mas adelante en este contrato.
 
 Politica A se mantiene completa: esta regla no autoriza crear allocations, ampliar reservations, cubrir demanda nueva, reasignar exceso ni buscar otro `sale_item` FIFO nuevo.
 
@@ -711,16 +711,27 @@ confirmed_restock_returned =
 
 `DAMAGED` no participa porque no reduce demanda de reposicion.
 
+Para evaluar una allocation `X` de un `sale_item`, `fulfilled_prior` representa todo fulfillment que ya redujo historicamente la demanda de ese `sale_item` antes de aplicar el nuevo `planned_fulfill_delta` de `X`.
+
 Definir:
 
 ```text
-fulfilled_prior =
+historical_fulfilled =
   SUM(replenishment_allocations.fulfilled_qty_base)
   del mismo sale_item
-  ya materializado antes de evaluar la allocation actual
+  ya persistido en el estado autoritativo bloqueado
+
+planned_fulfilled_before_X =
+  SUM(planned_fulfill_delta)
+  del mismo sale_item
+  ya planificado antes de X en esta FASE B
+
+fulfilled_prior =
+  historical_fulfilled
+  + planned_fulfilled_before_X
 ```
 
-`fulfilled_prior` debe incluir efectos anteriores de la misma transaccion cuando se procesan allocations del mismo `purchase_order` secuencialmente.
+`historical_fulfilled` incluye el `fulfilled_qty_base` historico de la allocation `X` actual si ya es mayor que `0`, porque ese fulfillment ya redujo demanda anteriormente. `planned_fulfilled_before_X` incluye efectos anteriores de esta misma transaccion cuando se procesan allocations del mismo `purchase_order` secuencialmente. No incluir el `planned_fulfill_delta` nuevo de `X`, porque todavia se esta calculando. No incluir planned deltas de allocations posteriores.
 
 Entonces:
 
@@ -746,6 +757,26 @@ remaining_reserved =
 ```
 
 Nunca asumir el `reserved_qty_base` completo si la allocation ya tiene resolucion parcial historica.
+
+Ejemplo defensivo:
+
+```text
+sale_item.quantity_base = 10
+confirmed_restock_returned = 0
+
+allocation X:
+  reserved_qty_base = 6
+  fulfilled_qty_base historico = 2
+  released_qty_base historico = 1
+  remaining_reserved = 3
+
+otras allocations historicamente fulfilled del mismo sale_item = 2
+
+historical_fulfilled total = 4
+current_sale_item_demand = 10 - 4 = 6
+```
+
+No calcular `current_sale_item_demand = 8` omitiendo los `2` ya fulfilled por `X`. Este estado parcial historico no es inconsistencia por si mismo; `remaining_reserved` existe precisamente como regla defensiva.
 
 Una allocation terminal cumple:
 
@@ -868,13 +899,13 @@ Esta condicion es:
 Si FASE B detecta `PURCHASE_REPLENISHMENT_PREDECESSOR_PENDING`:
 
 1. hacer rollback completo de FASE B;
-2. realizar una transaccion corta sobre `idempotency_keys`;
-3. verificar misma key/request_hash;
-4. mantener `status = 'IN_PROGRESS'`;
-5. liberar el lease actual;
-6. dejar `expires_at = NULL`;
-7. no marcar `COMPLETED`;
-8. no marcar `FAILED`.
+2. iniciar una transaccion corta;
+3. bloquear la fila `idempotency_keys FOR UPDATE`;
+4. verificar misma key/request_hash;
+5. releer `status` autoritativamente;
+6. solo si `status = 'IN_PROGRESS'`, mantener `status = 'IN_PROGRESS'`, liberar el lease actual y dejar `expires_at = NULL`;
+7. si al bloquear ya esta `COMPLETED`, no modificarla ni degradarla a `IN_PROGRESS`; resolver segun el resultado historico `COMPLETED`;
+8. si al bloquear ya esta `FAILED`, no modificarla ni degradarla a `IN_PROGRESS`; preservar el `FAILED` historico.
 
 Representacion conceptual del lease liberado:
 
@@ -883,6 +914,8 @@ locked_until <= now()
 ```
 
 Puede utilizarse `locked_until = now()` o semantica equivalente de implementacion. No se disena SQL definitivo.
+
+La ruta de `PURCHASE_REPLENISHMENT_PREDECESSOR_PENDING` nunca puede transicionar un estado terminal hacia `IN_PROGRESS`. Esta guard protege la carrera donde otro retry gano despues del `ROLLBACK` de la primera FASE B.
 
 La misma `idempotency_key` + `request_hash` puede reintentarse despues. Al llegar de nuevo, una key `IN_PROGRESS` con lease no vigente entra al flujo existente de recuperacion segura, reevalua `PURCHASE_REPLENISHMENT_PREDECESSOR_PENDING` contra el estado actual y puede continuar si el predecessor ya quedo terminal.
 
@@ -1215,11 +1248,14 @@ Por tanto toda `replenishment_allocations` del `purchase_order` origen queda ter
 Para cada allocation con `planned_fulfill_delta > 0`, crear exactamente un `replenishment_movements`:
 
 ```text
+branch_id = replenishment_allocation.branch_id
+product_id = replenishment_allocation.product_id
+channel = replenishment_allocation.channel
 movement_type = 'PURCHASE_FULFILL'
 demand_delta_base = -planned_fulfill_delta
 committed_delta_base = -planned_fulfill_delta
 reference_entity_type = 'replenishment_allocations'
-reference_entity_id = replenishment_allocations.id
+reference_entity_id = replenishment_allocation.id
 actor_user_id = actor actual autorizado de CONFIRM_PURCHASE
 ```
 
@@ -1228,15 +1264,20 @@ No crear `PURCHASE_FULFILL` con cantidad cero. `PURCHASE_FULFILL` representa dem
 Para cada allocation con `planned_release_delta > 0`, crear exactamente un `replenishment_movements`:
 
 ```text
+branch_id = replenishment_allocation.branch_id
+product_id = replenishment_allocation.product_id
+channel = replenishment_allocation.channel
 movement_type = 'ORDER_RELEASE'
 demand_delta_base = 0
 committed_delta_base = -planned_release_delta
 reference_entity_type = 'replenishment_allocations'
-reference_entity_id = replenishment_allocations.id
+reference_entity_id = replenishment_allocation.id
 actor_user_id = actor actual autorizado de CONFIRM_PURCHASE
 ```
 
 No crear `ORDER_RELEASE` con cantidad cero. `ORDER_RELEASE` libera compromiso, no cubre demanda y por eso no reduce `demand_qty_base`.
+
+`replenishment_allocation.branch_id`, `product_id` y `channel` deben coincidir con la `replenishment_positions` bloqueada y validada. No derivar silenciosamente esos valores desde otra entidad si existe una inconsistencia. Si no coinciden, corresponde `PURCHASE_REPLENISHMENT_INCONSISTENT`.
 
 La granularidad del ledger queda cerrada como un movement por allocation y por tipo no-cero:
 
@@ -1884,6 +1925,19 @@ Orden fisico de row locks:
 1. deduplicar todos los `sale_item_id` relevantes;
 2. adquirir `sale_items FOR KEY SHARE ORDER BY sale_items.id ASC`.
 
+El conjunto seguro de sale_items unicos relevantes para `CONFIRM_PURCHASE` es:
+
+```text
+todos los sale_item_id DISTINCT
+referenciados por replenishment_allocations
+pertenecientes a los purchase_order_items
+del purchase_order origen
+```
+
+No limitar este conjunto a allocations que terminaran con `planned_fulfill_delta > 0`, allocations que parecen activas durante discovery ni un subconjunto optimizado. Las allocations externas predecessor que SAFE consulta pertenecen a esos mismos `sale_item`; despues de obtener `replenishment_positions`, debe releerse autoritativamente el conjunto de allocations externas relevante antes de recomputar SAFE.
+
+Discovery sirve para descubrir IDs, no para congelar el resultado SAFE.
+
 Este orden fisico es obligatorio para compatibilidad con `CONFIRM_RETURN`, que bloquea sus `sale_items` en `id ASC` con lock incompatible. Evita el ciclo intra-tabla:
 
 ```text
@@ -1944,6 +1998,8 @@ Para `received_qty_base > 0`:
 Si otra transaccion inserto la misma PK y todavia no hizo `COMMIT`, la operacion conflictiva puede esperar su resolucion. Despues `CONFIRM_PURCHASE` debe ejecutar `SELECT ... FOR UPDATE` y releer el estado real.
 
 Nunca asumir `Q = 0` solo porque discovery no vio la fila.
+
+Si `CONFIRM_PURCHASE` tuvo que crear/asegurar una fila inexistente mediante `INSERT ... ON CONFLICT DO NOTHING` o mecanismo equivalente, despues debe bloquear y releer autoritativamente. Si esta operacion fue la que creo realmente la fila y aplica la recepcion inicial, la semantica cerrada conserva `version = 0`; no ejecutar ademas `version = version + 1` como si fuera un balance preexistente. Si otra transaccion creo la fila antes y `CONFIRM_PURCHASE` solo la encontro al releer, tratarla como balance existente autoritativo y aplicar las reglas normales de update/version.
 
 Las carreras tecnicas de unicidad/UPSERT o esperas por la PK no son `PURCHASE_INVENTORY_INCONSISTENT`.
 
@@ -3224,15 +3280,17 @@ No se agregan a FASE C en este micro-hito:
 Tratamiento especifico de `PURCHASE_REPLENISHMENT_PREDECESSOR_PENDING`:
 
 1. `ROLLBACK` completo de FASE B.
-2. Transaccion corta sobre `idempotency_keys`.
-3. Verificar misma `idempotency_key` y mismo `request_hash`.
-4. Mantener `status = 'IN_PROGRESS'`.
-5. Liberar el lease actual con `locked_until <= now()`; `locked_until = now()` es una representacion conceptual valida.
-6. Mantener `expires_at = NULL`.
-7. No marcar `COMPLETED`.
-8. No marcar `FAILED`.
+2. `BEGIN` corto.
+3. Bloquear `idempotency_keys FOR UPDATE`.
+4. Verificar misma `idempotency_key` y mismo `request_hash`.
+5. Releer `status` autoritativamente.
+6. Solo si `status = 'IN_PROGRESS'`, mantener `status = 'IN_PROGRESS'`, liberar el lease actual con `locked_until <= now()` y mantener `expires_at = NULL`; `locked_until = now()` es una representacion conceptual valida.
+7. Si ya esta `COMPLETED`, no modificarla ni degradarla a `IN_PROGRESS`; resolver segun el resultado historico `COMPLETED`.
+8. Si ya esta `FAILED`, no modificarla ni degradarla a `IN_PROGRESS`; preservar el `FAILED` historico.
 
 Un retry posterior de la misma key/hash entra al flujo de recuperacion segura de `IN_PROGRESS` con lease no vigente y reevalua la condicion contra el estado actual.
+
+Esta ruta nunca puede transicionar un estado terminal hacia `IN_PROGRESS`.
 
 `PURCHASE_IDEMPOTENCY_KEY_REUSED` y `PURCHASE_IDEMPOTENCY_IN_PROGRESS` pertenecen al contrato de la key y no son errores operativos de FASE B.
 
