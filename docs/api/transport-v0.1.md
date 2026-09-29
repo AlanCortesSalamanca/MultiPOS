@@ -1259,17 +1259,84 @@ Este micro-hito no define:
 - middleware concreto;
 - framework concreto.
 
-## 16. Decisiones todavia no cerradas
+## 16. Versionado compartido de rutas HTTP
+
+### Prefijo
+
+Toda ruta publica perteneciente a esta API versionada debe comenzar conceptualmente con:
+
+```text
+/api/v1
+```
+
+Ejemplo puramente estructural:
+
+```text
+/api/v1/...
+```
+
+Esta convencion no define la ruta concreta de ningun Command API.
+
+### Significado de v1
+
+`v1` representa la major version del contrato publico HTTP.
+
+Los cambios backward-compatible dentro de la misma version no requieren automaticamente `v2`.
+
+Los cambios breaking del contrato publico que no puedan introducirse de forma compatible requieren una nueva major version, por ejemplo `/api/v2/...`.
+
+Ejemplos conceptuales de cambios potencialmente breaking:
+
+- eliminar o renombrar campos publicos requeridos;
+- cambiar tipos publicos;
+- cambiar el significado contractual de un campo existente;
+- cambiar de forma incompatible una ruta o HTTP method;
+- eliminar valores previamente validos cuando eso rompa clientes;
+- cambiar envelopes compartidos de forma incompatible.
+
+Ejemplos que no exigen automaticamente una nueva major:
+
+- agregar un campo opcional cuando el contrato permita extension compatible;
+- agregar nuevos endpoints;
+- agregar nuevos error codes command-specific cuando el contrato permita evolucion compatible;
+- cambios internos de DB;
+- cambio de framework o refactors internos;
+- cambio de algoritmo interno de `request_hash` mientras preserve el contrato publico y la semantica idempotente correspondiente.
+
+Estos ejemplos no forman un catalogo exhaustivo. No se redefinen aqui reglas adicionales de compatibilidad de enums.
+
+### Versionado fuera del path
+
+Para la API HTTP v1, el mecanismo publico compartido de major version es el path. No usar como mecanismo principal:
+
+- Accept vendor media types;
+- query parameter `?version=`;
+- header custom de version.
+
+Esto no impide que HTTP use media types normales posteriormente.
+
+### Scope
+
+Transport define unicamente el prefijo y versionado compartidos. Cada Command API concreto sigue definiendo:
+
+- path restante;
+- HTTP method;
+- request DTO;
+- response DTO;
+- referencias concretas.
+
+Esta convencion no define hostname, base URL de produccion, puerto, HTTPS termination, reverse proxy, API gateway, deployment, CORS, auth provider, OpenAPI, deprecation/sunset headers ni estrategia completa de migracion v1 -> v2.
+
+## 17. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
 - algoritmo criptografico de `request_hash`;
 - otros headers exactos de transporte;
-- versionado de rutas;
 - OpenAPI.
 
-## 17. Fuera de alcance
+## 18. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -1286,7 +1353,7 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 18. Pendientes siguientes por micro-hitos
+## 19. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
