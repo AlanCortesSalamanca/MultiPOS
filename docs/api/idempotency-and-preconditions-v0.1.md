@@ -446,10 +446,10 @@ Queda explicitamente fuera de este documento:
 
 Pendientes para contratos API posteriores:
 
-1. Modelo conceptual de errores API.
-2. Autorizacion y contexto API.
-3. Wire-format de dinero, cantidades y timestamps.
-4. DTOs concretos por command.
-5. Transporte exacto de `idempotency_key`.
-6. Canonicalizacion exacta de `request_hash`.
-7. Politica publica de replay adicional solo donde el contrato transaccional deje margen; no puede cambiar la semantica de SAME TERMINAL KEY ya congelada.
+1. `Wire-format / Transport Conventions v0.1`, incluyendo donde corresponda: representacion wire de dinero y cantidades, timestamps, enums, transporte exacto de `idempotency_key`, canonicalizacion wire necesaria para `request_hash` y reglas publicas de replay donde el contrato frozen deje margen.
+2. Command API contracts concretos, uno por uno:
+   - `CONFIRM_SALE`.
+   - `CONFIRM_RETURN`.
+   - `CONFIRM_ORDER`.
+   - `CONFIRM_PURCHASE`.
+3. DTOs/mapping publicos concretos por command cuando corresponda.
