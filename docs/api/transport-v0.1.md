@@ -20,11 +20,11 @@ Contratos transaccionales frozen relevantes:
 
 ## 1. Estado del documento
 
-- Estado: BORRADOR CONTROLADO
+- Estado: FROZEN
 - Version: v0.1
 - Implementacion: no iniciada
 
-Este documento todavia NO queda congelado.
+Este documento queda congelado como contrato compartido de Transport v0.1.
 
 ## 2. Objetivo y alcance conceptual
 
