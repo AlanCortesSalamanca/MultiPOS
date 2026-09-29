@@ -403,7 +403,7 @@ Ejemplo minimo conceptual:
 
 Este micro-hito no define todavia:
 
-- HTTP status codes;
+- por si solo, el HTTP mapping, cuya autoridad queda en la seccion especifica de `HTTP mapping compartido`;
 - otros headers;
 - `Retry-After`;
 - correlation/request ID;
@@ -508,7 +508,7 @@ Este micro-hito no define:
 
 - algoritmo hash;
 - por si solo, el replay publico adicional, cuya autoridad queda en la seccion especifica de `Replay publico compartido`;
-- HTTP status;
+- por si solo, el HTTP mapping, cuya autoridad queda en la seccion especifica de `HTTP mapping compartido`;
 - `Retry-After`;
 - correlation/request ID;
 - auth headers;
@@ -654,7 +654,7 @@ Este micro-hito no define:
 - longitud del digest;
 - salt;
 - HMAC;
-- HTTP status;
+- por si solo, el HTTP mapping, cuya autoridad queda en la seccion especifica de `HTTP mapping compartido`;
 - correlation/request ID;
 - framework serializer;
 - OpenAPI.
@@ -803,7 +803,7 @@ Replay/reconciliation no debe convertirse en canal para:
 
 Este micro-hito no define:
 
-- HTTP status codes;
+- por si solo, el HTTP mapping, cuya autoridad queda en la seccion especifica de `HTTP mapping compartido`;
 - `Retry-After`;
 - headers adicionales de replay;
 - campo publico `replayed`/`reconciled`;
@@ -814,7 +814,200 @@ Este micro-hito no define:
 - OpenAPI;
 - framework/middleware.
 
-## 14. Decisiones todavia no cerradas
+## 14. HTTP mapping compartido
+
+HTTP status describe la semantica de transporte. `error.code` sigue siendo la autoridad programatica especifica.
+
+HTTP status no reemplaza codigos de dominio ni reclasifica errores frozen.
+
+### Success
+
+Para command confirmado exitosamente o replay/reconciliation exitoso:
+
+- HTTP `200 OK` como status publico compartido por defecto para estos Command APIs de confirmacion.
+
+No usar `201 Created` por el hecho de que internamente se haya creado una entidad, porque la operacion publica es un command de confirmacion y un replay/reconciliation debe poder devolver el mismo contrato de exito sin cambiar su semantica HTTP.
+
+No se definen endpoints todavia.
+
+### VALIDATION
+
+Mapping por defecto:
+
+- HTTP `422 Unprocessable Content`.
+
+Aplica a errores donde la solicitud es sintacticamente procesable pero viola reglas de validacion de dominio/input.
+
+No convertir automaticamente errores de estado, precondicion o autorizacion a `422`.
+
+### AUTHENTICATION
+
+Mapping:
+
+- HTTP `401 Unauthorized`.
+
+No se define todavia auth provider, `WWW-Authenticate` ni bearer/JWT.
+
+### AUTHORIZATION
+
+Mapping:
+
+- HTTP `403 Forbidden`.
+
+Debe cubrir errores conceptualmente de autorizacion como:
+
+- `USER_INACTIVE` cuando el error-model lo clasifique como autorizacion;
+- `USER_BRANCH_FORBIDDEN`;
+- `USER_PERMISSION_DENIED`.
+
+No clasificar automaticamente branch/business structural mismatches como `403`. Respetar `error-model-v0.1.md`: mismatch estructural no equivale automaticamente a `AUTHORIZATION`.
+
+### NOT_FOUND_VISIBILITY
+
+Mapping:
+
+- HTTP `404 Not Found`.
+
+Usar esta categoria cuando el contrato requiere no revelar si el recurso existe fuera de la frontera visible del caller/tenant.
+
+No usar `403` si eso revela existencia que el contrato decidio ocultar.
+
+### STATE_CONFLICT
+
+Mapping por defecto:
+
+- HTTP `409 Conflict`.
+
+Para conflictos con estado actual del recurso cuando la solicitud no puede aplicarse en ese estado.
+
+### PRECONDITION
+
+Mapping:
+
+- HTTP `412 Precondition Failed`.
+
+Esto cubre precondiciones explicitas/fingerprints stale cuando el error-model las clasifique como `PRECONDITION`.
+
+No usar `409` automaticamente para fingerprints si ya existe clasificacion `PRECONDITION`.
+
+### IDEMPOTENCY
+
+Mapping por defecto:
+
+- HTTP `409 Conflict`.
+
+Incluye conceptualmente:
+
+- `*_IDEMPOTENCY_KEY_REUSED`;
+- `*_IDEMPOTENCY_IN_PROGRESS`.
+
+No inventar todavia `Retry-After`. No definir polling.
+
+`FAILED` historico no recibe un HTTP status generico de `IDEMPOTENCY`: debe reproducir el error historico y por tanto el HTTP mapping correspondiente al error original cuando sea reconstruible segun contrato.
+
+### TEMPORARY_RETRYABLE
+
+Mapping por defecto:
+
+- HTTP `503 Service Unavailable`.
+
+Excepcion: si un error retryable de dominio tiene codigo/status mas especifico definido por el contrato/API, usar ese mapping especifico.
+
+No convertir automaticamente todo retryable a `503` solo por `retryable=true`.
+
+Para `PURCHASE_REPLENISHMENT_PREDECESSOR_PENDING`, revisar error-model/frozen contract antes de fijar un status especifico; si los documentos actuales no lo cierran de manera suficiente, su status exacto queda pendiente para el Command API.
+
+### INTERNAL_TECHNICAL
+
+Mapping por defecto:
+
+- HTTP `500 Internal Server Error`.
+
+Para indisponibilidad clara de infraestructura, un futuro mapping puede usar `503` si se distingue de forma segura y estable.
+
+No inventar nuevos `error.code` publicos para deadlock, timeout, SQL error, lock contention, etc.
+
+No exponer exception raw.
+
+### Structural/context mismatches
+
+Los codigos estructurales/contextuales se mapean por su categoria conceptual real, no por el nombre del codigo.
+
+Ejemplos:
+
+- `TERMINAL_BRANCH_MISMATCH` no es automaticamente `AUTHORIZATION`;
+- `BRANCH_BUSINESS_MISMATCH` no es automaticamente `AUTHORIZATION`;
+- `CUSTOMER_BUSINESS_MISMATCH` no es automaticamente `AUTHORIZATION`.
+
+Su status concreto debe derivarse de la categoria que error-model/Command API les asigne. Si el error-model actual no fija categoria exacta suficiente para uno de esos codigos, no inventarla aqui.
+
+### Replay
+
+Replay exitoso usa el mismo HTTP success status compartido del command.
+
+`FAILED` historico reproduce:
+
+- mismo `error.code`;
+- misma categoria conceptual;
+- HTTP status derivado de ese error historico.
+
+`KEY_REUSED` / `IN_PROGRESS` siguen su mapping de `IDEMPOTENCY`.
+
+No crear status especial de replay.
+
+### Error envelope
+
+El body mantiene:
+
+```json
+{
+  "error": {
+    "code": "...",
+    "message": "...",
+    "category": "...",
+    "retryable": false
+  }
+}
+```
+
+HTTP status no sustituye esos campos.
+
+### Tabla resumen
+
+| Category | Default HTTP |
+| --- | --- |
+| VALIDATION | 422 |
+| AUTHENTICATION | 401 |
+| AUTHORIZATION | 403 |
+| NOT_FOUND_VISIBILITY | 404 |
+| STATE_CONFLICT | 409 |
+| PRECONDITION | 412 |
+| IDEMPOTENCY | 409 |
+| TEMPORARY_RETRYABLE | 503 por defecto, sujeto a excepcion especifica |
+| INTERNAL_TECHNICAL | 500 por defecto |
+
+Exito:
+
+- success -> `200`.
+
+La tabla es default conceptual. No borra excepciones command-specific ni reclasifica errores frozen.
+
+Este micro-hito no define:
+
+- `Retry-After`;
+- `WWW-Authenticate`;
+- cache headers;
+- auth headers;
+- correlation/request ID;
+- rate limiting;
+- 429 policies;
+- redirect semantics;
+- CORS;
+- endpoints/routes;
+- OpenAPI;
+- framework exception handlers.
+
+## 15. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
@@ -822,13 +1015,12 @@ Este documento inicial no cierra:
 - formato decimal canonico publico fuera del contexto de `request_hash`;
 - formato, longitud y generacion de `idempotency_key`;
 - algoritmo criptografico de `request_hash`;
-- mapping por categoria/codigo a HTTP status;
 - otros headers exactos de transporte;
 - correlation/request ID;
 - versionado de rutas;
 - OpenAPI.
 
-## 15. Fuera de alcance
+## 16. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -845,12 +1037,11 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 16. Pendientes siguientes por micro-hitos
+## 17. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. HTTP mapping.
-2. Correlation/request ID si se adopta.
-3. Command API contracts uno por uno.
+1. Correlation/request ID si se adopta.
+2. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
