@@ -251,7 +251,66 @@ Este micro-hito no define todavia:
 
 Cada Command API define que campos enum aparecen. El vocabulario autoritativo proviene del contrato/modelo correspondiente. Transport solo define su representacion compartida.
 
-## 9. Decisiones todavia no cerradas
+## 9. Referencias publicas compartidas
+
+Los PK/FK `BIGINT` internos siguen siendo identidad fisica interna y no deben exponerse ni aceptarse por costumbre en la API publica.
+
+Cuando una entidad tenga `public_id`, `public_id` sera la referencia externa preferida.
+
+Wire type de `public_id`:
+
+- JSON string.
+
+`public_id` no autoriza acceso. Resolver un `public_id` a una PK interna no sustituye:
+
+- validacion de tenant/business;
+- validacion de branch;
+- permisos;
+- reglas de visibilidad;
+- validaciones especificas del command.
+
+Transport no debe inventar `public_id` para tablas o entidades que no lo poseen.
+
+`folio`:
+
+- es identificador operativo/humano cuando aplique;
+- no sustituye automaticamente `public_id`;
+- no debe asumirse globalmente unico salvo que el contrato correspondiente lo garantice;
+- el Command API concreto decide si se expone.
+
+Referencias de lineas/details como:
+
+- `sale_items`;
+- `return_items`;
+- `purchase_order_items`;
+- `purchase_items`;
+- `quotation_items`;
+
+no se convierten en recursos CRUD independientes por esta convencion. Si un Command API necesita referenciar una linea, ese contrato debe definir su identidad externa y validar pertenencia al aggregate.
+
+Transport solo define la representacion compartida. Cada Command API seguira decidiendo:
+
+- que aggregate/reference recibe;
+- que `public_id` concreto usa;
+- si una referencia va en path, query o body;
+- que referencias devuelve;
+- que referencias son opcionales u obligatorias.
+
+Este micro-hito no define todavia:
+
+- UUID version concreta;
+- generacion de `public_id`;
+- formato interno de PK;
+- endpoints/rutas;
+- path parameters;
+- naming definitivo de todos los campos ID;
+- IDs para entidades que hoy no tengan `public_id`;
+- exposicion global de folios;
+- OpenAPI.
+
+No se introduce `business_id` como selector libre de tenant.
+
+## 10. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
@@ -271,7 +330,7 @@ Este documento inicial no cierra:
 - versionado de rutas;
 - OpenAPI.
 
-## 10. Fuera de alcance
+## 11. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -288,17 +347,16 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 11. Pendientes siguientes por micro-hitos
+## 12. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. References publicas compartidas.
-2. Success/error envelopes.
-3. Idempotency/preconditions transport.
-4. Canonicalizacion wire para `request_hash`.
-5. Replay publico compartido donde proceda.
-6. HTTP mapping.
-7. Correlation/request ID si se adopta.
-8. Command API contracts uno por uno.
+1. Success/error envelopes.
+2. Idempotency/preconditions transport.
+3. Canonicalizacion wire para `request_hash`.
+4. Replay publico compartido donde proceda.
+5. HTTP mapping.
+6. Correlation/request ID si se adopta.
+7. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
