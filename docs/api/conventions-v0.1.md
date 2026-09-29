@@ -444,11 +444,14 @@ Queda explicitamente fuera de este documento:
 
 ## 23. Pendientes despues de este micro-hito
 
-Si este documento queda coherente, los siguientes contratos conceptuales deberian ser:
+Pendientes documentales vigentes:
 
-1. `API Idempotency and Preconditions v0.1`.
-2. `API Error Model v0.1`.
-3. `API Authorization / Context v0.1`.
-4. Command APIs frozen.
+1. `Wire-format / Transport Conventions v0.1`.
+2. Command API contracts, uno por uno:
+   - `CONFIRM_SALE`.
+   - `CONFIRM_RETURN`.
+   - `CONFIRM_ORDER`.
+   - `CONFIRM_PURCHASE`.
+3. Mapping publico definitivo de references/DTOs cuando corresponda.
 
 No se desarrollan aqui.
