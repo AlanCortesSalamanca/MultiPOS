@@ -147,13 +147,71 @@ Este micro-hito no define todavia:
 
 La wire representation no cambia precision/scale de dominio. Cada Command API decidira que campos decimales aparecen. Las reglas de redondeo siguen perteneciendo al contrato de dominio/transaccional correspondiente.
 
-## 7. Decisiones todavia no cerradas
+## 7. Representacion wire de timestamps
+
+Los timestamps publicos deben representarse como strings RFC 3339 con timezone/offset explicito.
+
+Wire type:
+
+- JSON string.
+
+Formato:
+
+- RFC 3339;
+- timezone/offset obligatorio.
+
+Para timestamps autoritativos generados por backend, la representacion publica canonica sera UTC usando sufijo `Z`.
+
+Ejemplo valido:
+
+```json
+"2026-09-28T23:41:15Z"
+```
+
+Ejemplo valido con fraccion cuando exista precision relevante:
+
+```json
+"2026-09-28T23:41:15.123456Z"
+```
+
+No usar timestamps ambiguos sin timezone, por ejemplo:
+
+```json
+"2026-09-28 23:41:15"
+"2026-09-28T23:41:15"
+```
+
+Fracciones de segundo:
+
+- pueden incluirse cuando la precision autoritativa las requiera;
+- no inventar precision inexistente;
+- no definir todavia una cantidad fija universal de digitos fraccionarios.
+
+El wire-format no cambia la semantica temporal persistida. Debe seguir siendo compatible conceptualmente con `TIMESTAMPTZ`. Transport no convierte timestamps autoritativos en hora local de sucursal dentro del contrato de transporte.
+
+La presentacion/localizacion de fechas u horas de UI corresponde al cliente. Transport conserva un instante inequivoco.
+
+Este micro-hito no define todavia:
+
+- timezone de negocio por sucursal;
+- reglas de calendario comercial;
+- date-only;
+- time-only;
+- duracion/intervalos;
+- parsing framework-specific;
+- serializador;
+- headers HTTP de fecha;
+- request timestamps command-specific;
+- canonicalizacion exacta de timestamps para `request_hash`.
+
+Restriccion heredada: `confirmed_at`, `closed_at`, `occurred_at` y timestamps autoritativos equivalentes no son determinados libremente por cliente cuando el contrato de dominio indique que los genera backend.
+
+## 8. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
 - formato decimal canonico;
-- representacion final de timestamp;
 - representacion enum;
 - success envelope;
 - error envelope JSON definitivo;
@@ -169,7 +227,7 @@ Este documento inicial no cierra:
 - versionado de rutas;
 - OpenAPI.
 
-## 8. Fuera de alcance
+## 9. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -186,19 +244,18 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 9. Pendientes siguientes por micro-hitos
+## 10. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Timestamps.
-2. Enums.
-3. References publicas compartidas.
-4. Success/error envelopes.
-5. Idempotency/preconditions transport.
-6. Canonicalizacion wire para `request_hash`.
-7. Replay publico compartido donde proceda.
-8. HTTP mapping.
-9. Correlation/request ID si se adopta.
-10. Command API contracts uno por uno.
+1. Enums.
+2. References publicas compartidas.
+3. Success/error envelopes.
+4. Idempotency/preconditions transport.
+5. Canonicalizacion wire para `request_hash`.
+6. Replay publico compartido donde proceda.
+7. HTTP mapping.
+8. Correlation/request ID si se adopta.
+9. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
