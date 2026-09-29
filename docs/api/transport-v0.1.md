@@ -404,7 +404,7 @@ Ejemplo minimo conceptual:
 Este micro-hito no define todavia:
 
 - HTTP status codes;
-- headers;
+- otros headers;
 - `Retry-After`;
 - correlation/request ID;
 - tracing;
@@ -414,25 +414,126 @@ Este micro-hito no define todavia:
 - OpenAPI;
 - framework serializer.
 
-## 11. Decisiones todavia no cerradas
+## 11. Idempotency/preconditions transport
+
+### Idempotency-Key
+
+`idempotency_key` se transporta mediante el header HTTP:
+
+```text
+Idempotency-Key: <opaque-value>
+```
+
+Reglas:
+
+- `idempotency_key` es concern de transporte/idempotencia, no dato de dominio del payload;
+- no incluir `idempotency_key` como campo del JSON body del command;
+- cambiar unicamente `idempotency_key` no implica por si mismo un `request_hash` distinto;
+- `idempotency_key` sigue estando sujeta al scope fisico ya definido por los contratos: `(business_id, operation_type, idempotency_key)`;
+- la key es opaca para cliente y servidor a nivel semantico;
+- no derivar permisos, tenant, branch ni identidad desde la key;
+- no confundir `idempotency_key` con `client_operation_id`.
+
+Este micro-hito cierra solamente el nombre del header: `Idempotency-Key`.
+
+No define todavia:
+
+- longitud minima/maxima;
+- charset exacto;
+- UUID obligatorio;
+- ULID obligatorio;
+- generacion del lado cliente;
+- expiracion publica;
+- `Retry-After`;
+- otros headers de replay;
+- representacion publica de estado de idempotencia.
+
+### client_operation_id
+
+`client_operation_id`:
+
+- es dato conceptual del command donde aplique;
+- no es `idempotency_key`;
+- no se mueve al header `Idempotency-Key`;
+- su ubicacion publica concreta se define en el Command API correspondiente;
+- su semantica frozen de `CONFIRM_SALE` / `CONFIRM_RETURN` no cambia.
+
+### Fingerprints/preconditions
+
+Los fingerprints esperados son datos semanticos del command, no infraestructura generica de transporte.
+
+Reglas:
+
+- `expected_draft_fingerprint` permanece dentro del payload del futuro `CONFIRM_ORDER`;
+- `expected_purchase_fingerprint` permanece dentro del payload del futuro `CONFIRM_PURCHASE`;
+- no usar un header generico para moverlos;
+- no aplicar fingerprints a `CONFIRM_SALE` / `CONFIRM_RETURN` si sus contratos frozen no los definen.
+
+Wire type conceptual para fingerprints:
+
+- JSON string.
+
+El valor es opaco desde la perspectiva del cliente. El cliente no interpreta su contenido. El backend compara contra el fingerprint autoritativo segun el contrato transaccional.
+
+No se define todavia:
+
+- encoding interno exacto;
+- algoritmo de generacion;
+- tamano exacto;
+- canonicalizacion;
+- hash algorithm.
+
+### Seguridad
+
+No exponer automaticamente:
+
+- `request_hash` completo;
+- fingerprints completos en errores salvo representacion segura permitida;
+- `idempotency_key` completa en logs/errores cuando la politica concreta no lo permita.
+
+### Semantica frozen
+
+Este micro-hito no cambia:
+
+- SAME KEY + SAME HASH;
+- SAME KEY + DIFFERENT HASH;
+- `IN_PROGRESS`;
+- `COMPLETED`;
+- `FAILED`;
+- leases;
+- reconciliacion por `client_operation_id`;
+- diferencias entre `CONFIRM_SALE` / `CONFIRM_RETURN` y `CONFIRM_ORDER` / `CONFIRM_PURCHASE`.
+
+Este micro-hito no define:
+
+- canonicalizacion de `request_hash`;
+- algoritmo hash;
+- replay publico adicional;
+- HTTP status;
+- `Retry-After`;
+- correlation/request ID;
+- auth headers;
+- JWT/bearer/cookies;
+- OpenAPI;
+- framework/middleware.
+
+## 12. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
 - formato decimal canonico;
-- transporte exacto de `idempotency_key`;
 - formato, longitud y generacion de `idempotency_key`;
-- ubicacion de fingerprints;
 - canonicalizacion de `request_hash`;
 - algoritmo criptografico de `request_hash`;
 - mapping por categoria/codigo a HTTP status;
-- headers exactos;
+- otros headers exactos de transporte;
 - politica de replay publica adicional donde exista margen;
 - correlation/request ID;
 - versionado de rutas;
 - OpenAPI.
 
-## 12. Fuera de alcance
+## 13. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -449,15 +550,14 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 13. Pendientes siguientes por micro-hitos
+## 14. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Idempotency/preconditions transport.
-2. Canonicalizacion wire para `request_hash`.
-3. Replay publico compartido donde proceda.
-4. HTTP mapping.
-5. Correlation/request ID si se adopta.
-6. Command API contracts uno por uno.
+1. Canonicalizacion wire para `request_hash`.
+2. Replay publico compartido donde proceda.
+3. HTTP mapping.
+4. Correlation/request ID si se adopta.
+5. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
