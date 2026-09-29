@@ -310,14 +310,116 @@ Este micro-hito no define todavia:
 
 No se introduce `business_id` como selector libre de tenant.
 
-## 10. Decisiones todavia no cerradas
+## 10. Success/error envelopes
+
+### Success envelope compartido
+
+Las respuestas publicas exitosas deben usar esta forma conceptual:
+
+```json
+{
+  "data": {}
+}
+```
+
+Reglas:
+
+- `data` contiene el payload publico especifico del Command API;
+- Transport define solo el envelope;
+- cada Command API define la estructura concreta de `data`;
+- no asumir que `data` equivale a `idempotency_keys.response_body`;
+- no introducir automaticamente metadata adicional en este micro-hito;
+- no definir pagination, collections ni recursos CRUD genericos.
+
+Ejemplo minimo conceptual:
+
+```json
+{
+  "data": {
+    "example": "command-specific payload"
+  }
+}
+```
+
+### Error envelope compartido
+
+Las respuestas publicas de error deben usar esta forma conceptual:
+
+```json
+{
+  "error": {
+    "code": "...",
+    "message": "...",
+    "category": "...",
+    "retryable": false,
+    "details": {}
+  }
+}
+```
+
+Campos:
+
+- `code`: JSON string. Identificador estable de maquina. Usa codigo exacto frozen cuando exista. No se traduce. No contiene IDs, hashes ni texto variable.
+- `message`: JSON string. Mensaje publico seguro y breve. No es autoridad programatica. No congela copy localizado definitivo.
+- `category`: JSON string. Usa las categorias conceptuales ya definidas por `docs/api/error-model-v0.1.md`. No se inventan nuevas categorias aqui.
+- `retryable`: JSON boolean. Expresa retryability conceptual. No implica por si solo retry inmediato, misma key o nueva key.
+- `details`: JSON object opcional. Debe contener unicamente metadata publica segura permitida por el contrato concreto. Puede omitirse cuando no exista metadata segura relevante. Transport no define todavia un catalogo global de campos `details`.
+
+No exponer mediante error/details:
+
+- PK/FK `BIGINT` internos;
+- SQL;
+- stack traces;
+- exceptions raw;
+- constraints internas;
+- locks internos;
+- `request_hash` completo;
+- fingerprints completos salvo representacion segura explicitamente permitida;
+- `idempotency_key` completa cuando el contrato no lo permita;
+- secretos/tokens;
+- datos cross-tenant;
+- detalles de infraestructura innecesarios.
+
+Mantener semantica de errores frozen:
+
+- SAME KEY + SAME HASH + `FAILED` reproduce el error historico correspondiente segun contrato;
+- no inventar `IDEMPOTENCY_FAILED` generico;
+- KEY_REUSED mantiene codigo especifico por command;
+- IN_PROGRESS mantiene codigo especifico por command;
+- errores tecnicos no se convierten automaticamente en errores de dominio.
+
+Ejemplo minimo conceptual:
+
+```json
+{
+  "error": {
+    "code": "PURCHASE_DRAFT_STALE",
+    "message": "The resource no longer matches the expected state.",
+    "category": "PRECONDITION",
+    "retryable": false
+  }
+}
+```
+
+Este micro-hito no define todavia:
+
+- HTTP status codes;
+- headers;
+- `Retry-After`;
+- correlation/request ID;
+- tracing;
+- localization definitiva;
+- estructura concreta de `data` por command;
+- estructura exhaustiva de `details`;
+- OpenAPI;
+- framework serializer.
+
+## 11. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
 - formato decimal canonico;
-- success envelope;
-- error envelope JSON definitivo;
 - transporte exacto de `idempotency_key`;
 - formato, longitud y generacion de `idempotency_key`;
 - ubicacion de fingerprints;
@@ -330,7 +432,7 @@ Este documento inicial no cierra:
 - versionado de rutas;
 - OpenAPI.
 
-## 11. Fuera de alcance
+## 12. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -347,16 +449,15 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 12. Pendientes siguientes por micro-hitos
+## 13. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Success/error envelopes.
-2. Idempotency/preconditions transport.
-3. Canonicalizacion wire para `request_hash`.
-4. Replay publico compartido donde proceda.
-5. HTTP mapping.
-6. Correlation/request ID si se adopta.
-7. Command API contracts uno por uno.
+1. Idempotency/preconditions transport.
+2. Canonicalizacion wire para `request_hash`.
+3. Replay publico compartido donde proceda.
+4. HTTP mapping.
+5. Correlation/request ID si se adopta.
+6. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
