@@ -138,7 +138,7 @@ Reglas de representacion publica:
 Este micro-hito no define todavia:
 
 - reglas exactas de padding/trailing zeros por tipo;
-- normalizacion exacta para `request_hash`;
+- por si sola, la canonicalizacion para `request_hash`, cuya autoridad queda en la seccion especifica de `Canonicalizacion wire para request_hash`;
 - limites de validacion por campo;
 - rounding por operacion;
 - localizacion/UI;
@@ -506,7 +506,6 @@ Este micro-hito no cambia:
 
 Este micro-hito no define:
 
-- canonicalizacion de `request_hash`;
 - algoritmo hash;
 - replay publico adicional;
 - HTTP status;
@@ -517,14 +516,157 @@ Este micro-hito no define:
 - OpenAPI;
 - framework/middleware.
 
-## 12. Decisiones todavia no cerradas
+## 12. Canonicalizacion wire para request_hash
+
+`request_hash` representa el contenido semantico canonico del command, no la identidad de transporte de la solicitud.
+
+Por tanto:
+
+- `Idempotency-Key` no forma parte del contenido canonicalizado;
+- cambiar unicamente `Idempotency-Key` no cambia `request_hash`;
+- headers de autenticacion, tracing o transporte tampoco forman parte del command canonico salvo que un contrato futuro lo declare explicitamente por una razon semantica.
+
+### Base de canonicalizacion
+
+La canonicalizacion parte de la representacion logica del command definida por su Command API concreto.
+
+No canonicalizar:
+
+- SQL;
+- filas persistidas completas;
+- estado derivado no enviado por el cliente;
+- valores generados por backend;
+- headers de transporte no semanticos.
+
+### Objetos JSON
+
+- las propiedades se ordenan lexicograficamente por nombre para obtener representacion determinista;
+- el orden original de propiedades recibido no tiene significado;
+- propiedades ausentes y propiedades presentes con `null` no deben asumirse equivalentes salvo que el Command API lo declare explicitamente;
+- no introducir propiedades default silenciosamente durante canonicalizacion salvo que el Command API defina esa normalizacion.
+
+### Arrays
+
+- preservar el orden recibido cuando el array sea semanticamente ordenado;
+- Transport no puede ordenar arrays arbitrariamente;
+- si un Command API declara explicitamente un conjunto no ordenado, ese contrato debe definir su regla de normalizacion antes del hash;
+- no universalizar sorting de line items.
+
+### Strings
+
+- tratar strings como valores semanticos exactos segun el contrato;
+- no aplicar trim, lowercase, uppercase, Unicode folding ni localizacion automaticamente;
+- enums conservan exactamente el simbolo frozen;
+- IDs/references conservan su representacion publica definida.
+
+### Decimales
+
+Los decimales siguen siendo JSON strings.
+
+Reglas para hashing:
+
+- usar `.` como separador decimal;
+- no usar separadores de miles;
+- no usar notacion cientifica;
+- eliminar ceros no significativos a la izquierda;
+- normalizar cero negativo a cero positivo;
+- usar una representacion decimal determinista compatible con la precision/scale del campo.
+
+No se inventa una unica cantidad universal de decimales para todos los tipos. La normalizacion concreta debe respetar el scale semantico del campo definido por dominio/Command API.
+
+Si dos representaciones son semanticamente equivalentes segun el scale del campo, deben canonicalizar al mismo valor. Transport no debe permitir que diferencias meramente textuales de padding produzcan hashes distintos.
+
+Esta regla no altera reglas de rounding del dominio.
+
+### Timestamps
+
+Para valores timestamp que legitimamente formen parte del command:
+
+- canonicalizar a RFC 3339 UTC con `Z`;
+- offsets equivalentes que representen el mismo instante deben canonicalizar al mismo instante UTC;
+- no inventar precision temporal inexistente;
+- la precision fraccionaria utilizada debe ser determinista segun el valor/contrato correspondiente.
+
+No incluir timestamps generados autoritativamente por backend si no forman parte del command del cliente.
+
+### Enums
+
+- usar exactamente el simbolo frozen;
+- case-sensitive;
+- no traducir ni normalizar aliases.
+
+### Booleans / null
+
+- boolean canonical: JSON `true` / `false`;
+- `null` permanece JSON `null` cuando el Command API permita/defina el campo como presente y nulo;
+- ausencia != `null` salvo regla explicita del Command API.
+
+### Public references
+
+- usar la representacion publica definida por el Command API;
+- no sustituir una referencia publica por `BIGINT` interno antes del hash;
+- resolucion a PK interna ocurre despues y no debe cambiar la identidad semantica del command.
+
+### Serializacion canonica
+
+El backend debe producir una representacion byte/string determinista antes de aplicar el hash.
+
+Reglas minimas:
+
+- UTF-8;
+- sin whitespace insignificant;
+- propiedades de objetos en orden lexicografico ordinal/determinista e independiente de locale sobre los nombres de las propiedades;
+- strings JSON escapadas de forma valida y determinista: escapar obligatoriamente `"` y `\`, escapar caracteres de control requeridos por JSON, usar representacion Unicode directa codificada en UTF-8 para los demas caracteres Unicode y no convertir arbitrariamente caracteres permitidos a escapes `\uXXXX`;
+- arrays en orden semantico;
+- tipos preservados.
+
+No se adopta todavia formalmente RFC 8785/JCS ni otra especificacion externa. No se define todavia libreria concreta.
+
+### Scope command-specific
+
+Cada Command API debe declarar exactamente que campos pertenecen a su payload canonico para `request_hash`.
+
+Transport define reglas compartidas de canonicalizacion, pero no decide aqui el payload de:
+
+- `CONFIRM_SALE`;
+- `CONFIRM_RETURN`;
+- `CONFIRM_ORDER`;
+- `CONFIRM_PURCHASE`.
+
+### Semantica frozen
+
+Este micro-hito no cambia:
+
+- scope fisico de idempotencia;
+- SAME KEY + SAME HASH;
+- SAME KEY + DIFFERENT HASH;
+- `client_operation_id`;
+- fingerprints;
+- estados `IN_PROGRESS` / `COMPLETED` / `FAILED`;
+- reglas de autorizacion/reconciliacion;
+- locks;
+- efectos.
+
+Este micro-hito no define:
+
+- algoritmo criptografico final;
+- encoding final del hash almacenado;
+- longitud del digest;
+- salt;
+- HMAC;
+- replay publico;
+- HTTP status;
+- correlation/request ID;
+- framework serializer;
+- OpenAPI.
+
+## 13. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
-- formato decimal canonico;
+- formato decimal canonico publico fuera del contexto de `request_hash`;
 - formato, longitud y generacion de `idempotency_key`;
-- canonicalizacion de `request_hash`;
 - algoritmo criptografico de `request_hash`;
 - mapping por categoria/codigo a HTTP status;
 - otros headers exactos de transporte;
@@ -533,7 +675,7 @@ Este documento inicial no cierra:
 - versionado de rutas;
 - OpenAPI.
 
-## 13. Fuera de alcance
+## 14. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -550,14 +692,13 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 14. Pendientes siguientes por micro-hitos
+## 15. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Canonicalizacion wire para `request_hash`.
-2. Replay publico compartido donde proceda.
-3. HTTP mapping.
-4. Correlation/request ID si se adopta.
-5. Command API contracts uno por uno.
+1. Replay publico compartido donde proceda.
+2. HTTP mapping.
+3. Correlation/request ID si se adopta.
+4. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
