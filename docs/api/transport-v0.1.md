@@ -28,11 +28,11 @@ Este documento todavia NO queda congelado.
 
 ## 2. Objetivo y alcance conceptual
 
-Este documento servira para definir, en micro-hitos posteriores, convenciones compartidas de wire-format y transporte para futuros contratos API de GENGXIN POS.
+Este documento define convenciones compartidas de wire-format y transporte para los contratos API de GENGXIN POS: representacion wire, envelopes, transporte de idempotencia, canonicalizacion compartida, replay, HTTP mapping, request/correlation ID y versionado de rutas.
 
 El objetivo es adaptar a una frontera publica la representacion y transporte de commands, responses y errores sin modificar la semantica de dominio congelada en los contratos transaccionales.
 
-Este primer micro-hito solo establece la frontera del documento. No resuelve todavia wire-format, endpoints, DTOs, HTTP mapping, headers, canonicalizacion, algoritmos criptograficos ni OpenAPI.
+Transport no define las rutas concretas de cada Command API, HTTP method command-specific cuando corresponda, request/response DTO concretos ni el payload canonico concreto de cada command. Tampoco elige framework/backend ni define implementacion u OpenAPI.
 
 ## 3. Principio de autoridad
 
@@ -54,20 +54,21 @@ Los contratos transaccionales frozen siguen siendo la autoridad de negocio. Los 
 
 ### TRANSPORT
 
-Este documento podra cerrar posteriormente:
+Este documento define las convenciones compartidas de Transport para:
 
 - representacion wire de dinero, cantidades, costos y factores;
 - timestamps;
 - enums;
 - representacion de referencias publicas compartidas;
-- success envelope compartido si se adopta;
+- success envelope compartido;
 - error envelope compartido;
 - transporte de `idempotency_key`;
 - transporte de fingerprints/preconditions;
 - canonicalizacion wire necesaria para `request_hash`;
 - reglas publicas compartidas de replay donde los contratos frozen dejen margen;
 - mapping HTTP;
-- correlation/request identifier si se adopta.
+- correlation/request identifier compartido;
+- versionado compartido de rutas HTTP.
 
 ### COMMAND API
 
@@ -826,17 +827,21 @@ No universalizar comportamiento.
 
 `CONFIRM_SALE`:
 
-- despues de idempotency lock y advisory lock por `(branch_id, client_operation_id)`, si ya existe `sales(branch_id, client_operation_id)`, prevalece la entidad existente;
-- se reconcilia la key actual a `COMPLETED`;
-- se devuelve la venta existente;
-- esto ocurre antes de validaciones posteriores de branch/terminal/user/permission;
-- Transport no agrega authorization-before-reconciliation.
+- para una key nueva o `IN_PROGRESS` recuperable, la reconciliacion contra una venta existente por `client_operation_id` sigue la secuencia frozen;
+- si la venta correspondiente ya existe, prevalece la entidad historica;
+- la key actual se reconcilia segun el contrato frozen;
+- se devuelve la venta existente sin repetir efectos;
+- esto ocurre antes de las validaciones posteriores que el contrato frozen coloca despues de la reconciliacion;
+- Transport no introduce authorization-before-reconciliation.
 
 `CONFIRM_RETURN`:
 
-- misma regla conceptual con `returns(branch_id, client_operation_id)`;
-- la devolucion existente prevalece;
-- reconciliar key y devolverla antes de validaciones posteriores;
+- para una key nueva o `IN_PROGRESS` recuperable, la reconciliacion contra una devolucion existente por `client_operation_id` sigue la secuencia frozen;
+- si la devolucion correspondiente ya existe, prevalece la entidad historica;
+- la key actual se reconcilia segun el contrato frozen;
+- se devuelve la devolucion existente sin repetir efectos;
+- esto ocurre antes de las validaciones posteriores que el contrato frozen coloca despues de la reconciliacion;
+- Transport no introduce authorization-before-reconciliation;
 - no imponer la regla de `CONFIRM_ORDER` / `CONFIRM_PURCHASE`.
 
 `CONFIRM_ORDER`:
@@ -1327,9 +1332,9 @@ Transport define unicamente el prefijo y versionado compartidos. Cada Command AP
 
 Esta convencion no define hostname, base URL de produccion, puerto, HTTPS termination, reverse proxy, API gateway, deployment, CORS, auth provider, OpenAPI, deprecation/sunset headers ni estrategia completa de migracion v1 -> v2.
 
-## 17. Decisiones todavia no cerradas
+## 17. Decisiones diferidas no bloqueantes
 
-Este documento inicial no cierra:
+Estas decisiones pueden cerrarse posteriormente cuando una necesidad concreta de implementacion o contrato lo requiera. No impiden definir `CONFIRM_SALE`:
 
 - JSON media type exacto si corresponde;
 - algoritmo criptografico de `request_hash`;
@@ -1359,4 +1364,4 @@ Secuencia recomendada para micro-hitos posteriores:
 
 1. Command API contracts uno por uno.
 
-No se desarrolla ninguna de esas decisiones en este documento inicial.
+Las decisiones diferidas de la seccion anterior no se desarrollan en esta version y no bloquean el siguiente paso.
