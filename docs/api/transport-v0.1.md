@@ -434,19 +434,89 @@ Reglas:
 - no derivar permisos, tenant, branch ni identidad desde la key;
 - no confundir `idempotency_key` con `client_operation_id`.
 
-Este micro-hito cierra solamente el nombre del header: `Idempotency-Key`.
+### Presencia
 
-No define todavia:
+Para Command APIs que requieran idempotencia, `Idempotency-Key` es obligatorio.
 
-- longitud minima/maxima;
-- charset exacto;
-- UUID obligatorio;
-- ULID obligatorio;
-- generacion del lado cliente;
-- expiracion publica;
+La decision de que commands requieren el header proviene del Command API/contrato correspondiente.
+
+No se convierte esto en una regla para futuros endpoints que no sean commands idempotentes.
+
+### Formato publico
+
+El valor debe:
+
+- ser una unica string con caracteres ASCII desde `0x21` hasta `0x7E`, inclusive;
+- tener longitud entre 1 y 128 caracteres;
+- no contener espacios;
+- no contener caracteres de control;
+- no contener CR/LF;
+- tratarse como valor opaco y case-sensitive.
+
+Las prohibiciones de espacios, caracteres de control y CR/LF son consistentes con el rango permitido `0x21`-`0x7E`.
+
+No interpretar prefijos ni estructura interna.
+
+No se exige UUID ni ULID. UUID v4, ULID u otros identificadores suficientemente unicos pueden ser utilizados por clientes siempre que cumplan el contrato publico.
+
+### Generacion
+
+La generacion corresponde al cliente que inicia la operacion logica.
+
+Una operacion logica nueva debe usar una nueva `Idempotency-Key`.
+
+Un retry/reintento de la misma operacion logica que deba aprovechar la semantica idempotente debe reutilizar la misma key segun las reglas del command.
+
+Cambiar solamente la key no cambia `request_hash`.
+
+No usar `X-Request-Id` como sustituto de `Idempotency-Key`.
+
+### Seguridad de la key
+
+La key:
+
+- no contiene secretos;
+- no debe contener tokens;
+- no debe codificar passwords;
+- no debe usarse para autorizacion;
+- no determina tenant, business, branch ni user;
+- debe validarse antes de incluirse en logs para evitar log injection.
+
+No se define aqui una politica completa de logging.
+
+### Valor invalido o ausente
+
+Para un Command API que exige idempotencia:
+
+- ausencia del header o formato invalido debe tratarse como error publico de `VALIDATION`;
+- no debe iniciarse la ejecucion del command;
+- no crear una fila idempotente usando un valor invalido.
+
+No se inventa todavia un `error.code` especifico compartido si los contratos actuales no lo definen. El Command API concreto cierra el `error.code` si hace falta.
+
+El HTTP mapping sigue la regla existente de `VALIDATION` -> `422`.
+
+### Persistencia
+
+Transport no cambia:
+
+- scope fisico;
+- leases;
+- expiracion interna;
+- lifecycle;
+- constraints de DB.
+
+No se define aqui como se almacena la key internamente.
+
+Este micro-hito no define:
+
+- algoritmo de `request_hash`;
+- expiracion publica de keys;
 - `Retry-After`;
-- otros headers de replay;
-- representacion publica de estado de idempotencia.
+- replay headers adicionales;
+- backend/framework;
+- middleware concreto;
+- OpenAPI.
 
 ### client_operation_id
 
@@ -1171,7 +1241,6 @@ Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
 - formato decimal canonico publico fuera del contexto de `request_hash`;
-- formato, longitud y generacion de `idempotency_key`;
 - algoritmo criptografico de `request_hash`;
 - otros headers exactos de transporte;
 - versionado de rutas;
