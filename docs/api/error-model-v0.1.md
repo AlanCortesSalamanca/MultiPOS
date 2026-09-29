@@ -219,7 +219,7 @@ Codigos compartidos existentes:
 - `USER_BRANCH_FORBIDDEN`;
 - `USER_PERMISSION_DENIED`.
 
-Codigos de branch/business respaldados por contratos frozen:
+Codigos relacionados de branch/business y mismatch estructural respaldados por contratos frozen:
 
 - `BRANCH_INACTIVE`;
 - `BRANCH_BUSINESS_MISMATCH`;
@@ -231,6 +231,8 @@ Codigos de branch/business respaldados por contratos frozen:
 - `PRICE_LIST_BUSINESS_MISMATCH`;
 - `PRODUCT_BUSINESS_MISMATCH`;
 - `SUPPLIER_BUSINESS_MISMATCH`.
+
+Estos codigos se listan como contexto de frontera y consistencia estructural. No son automaticamente errores de categoria `AUTHORIZATION`.
 
 Principios:
 
