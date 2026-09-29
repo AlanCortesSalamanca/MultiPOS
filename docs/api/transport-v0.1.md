@@ -128,16 +128,40 @@ Precisiones conceptuales heredadas:
 Reglas de representacion publica:
 
 - en JSON publico, estos valores viajan como strings;
-- ejemplos validos conceptuales: `"1250.50"`, `"3.2500"`, `"18.123456"`;
-- no usar JSON number como representacion publica autoritativa para estos valores exactos;
-- no usar notacion cientifica en la representacion canonica futura;
+- la representacion publica canonica usa exactamente el `scale` semantico del campo;
+- la parte entera contiene al menos un digito, elimina ceros no significativos a la izquierda y representa cero como `0`;
+- para `scale > 0`, la parte fraccionaria contiene exactamente `scale` digitos y el punto decimal no se omite;
+- no usar signo `+`; usar `-` solo para valores negativos cuando el dominio lo permita;
+- normalizar cero negativo a cero positivo respetando el `scale`;
 - el separador decimal es `.`;
-- no usar separadores de miles;
-- el signo negativo, cuando el campo de dominio lo permita, se representa con `-` inicial.
+- no usar separadores de miles, notacion cientifica ni formatos localizados;
+- no usar JSON numbers como representacion publica autoritativa para estos valores exactos.
+
+Ejemplos de representacion canonica:
+
+| Scale | Valor | Representacion |
+| --- | --- | --- |
+| 2 | 1 | `"1.00"` |
+| 2 | 1.5 | `"1.50"` |
+| 2 | 1250.50 | `"1250.50"` |
+| 4 | 3 | `"3.0000"` |
+| 4 | 3.25 | `"3.2500"` |
+| 6 | 18.123 | `"18.123000"` |
+| 2 | -0.00 | `"0.00"` |
+| 4 | -0.0000 | `"0.0000"` |
+
+Por ejemplo, `"00012.50"` no es canonico; `"12.50"` si. Para un campo con scale 2, `"10"` y `"10.0"` no son representaciones publicas canonicas; la forma canonica es `"10.00"`.
+
+El contrato publico normativo es la forma canonica. No se decide aqui si una implementacion futura tolerara input no canonico antes de validarlo.
+
+Toda respuesta publica debe emitir los decimales exactos en la forma canonica correspondiente al `scale` del campo.
+
+Transport no redondea ni trunca silenciosamente. Si un valor tiene mas precision que la permitida, rechazarlo, redondearlo o truncarlo sigue siendo responsabilidad del dominio o Command API correspondiente.
+
+La representacion publica canonica es compatible con las reglas de canonicalizacion de `request_hash` definidas en su seccion especifica; este micro-hito no cambia esas reglas.
 
 Este micro-hito no define todavia:
 
-- reglas exactas de padding/trailing zeros por tipo;
 - por si sola, la canonicalizacion para `request_hash`, cuya autoridad queda en la seccion especifica de `Canonicalizacion wire para request_hash`;
 - limites de validacion por campo;
 - rounding por operacion;
@@ -1240,7 +1264,6 @@ Este micro-hito no define:
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
-- formato decimal canonico publico fuera del contexto de `request_hash`;
 - algoritmo criptografico de `request_hash`;
 - otros headers exactos de transporte;
 - versionado de rutas;
