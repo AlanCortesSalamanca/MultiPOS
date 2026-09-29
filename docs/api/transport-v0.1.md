@@ -507,7 +507,7 @@ Este micro-hito no cambia:
 Este micro-hito no define:
 
 - algoritmo hash;
-- replay publico adicional;
+- por si solo, el replay publico adicional, cuya autoridad queda en la seccion especifica de `Replay publico compartido`;
 - HTTP status;
 - `Retry-After`;
 - correlation/request ID;
@@ -654,13 +654,167 @@ Este micro-hito no define:
 - longitud del digest;
 - salt;
 - HMAC;
-- replay publico;
 - HTTP status;
 - correlation/request ID;
 - framework serializer;
 - OpenAPI.
 
-## 13. Decisiones todavia no cerradas
+## 13. Replay publico compartido
+
+Un replay/reconciliation publico nunca debe volver a ejecutar efectos ya materializados.
+
+La response publica puede reconstruirse desde estado persistido/autoritativo cuando el contrato frozen lo permita. `idempotency_keys.response_body` sigue siendo almacenamiento interno y no se convierte automaticamente en DTO publico.
+
+### SAME TERMINAL KEY + SAME HASH + COMPLETED
+
+Mantener semantica frozen command-specific.
+
+Regla publica compartida permitida:
+
+- devolver una response publica de exito equivalente a la operacion historica;
+- no repetir efectos;
+- no crear una segunda entidad;
+- no cambiar el resultado historico por estado actual posterior;
+- reconstruir el DTO publico desde estado autoritativo cuando corresponda.
+
+No se impone reauthorization/revalidation transversal.
+
+En particular:
+
+- `CONFIRM_PURCHASE` conserva replay historico exacto sin reautorizar ni revalidar user, branch ni catalogos;
+- `CONFIRM_SALE`, `CONFIRM_RETURN` y `CONFIRM_ORDER` siguen su semantica frozen correspondiente.
+
+### SAME TERMINAL KEY + SAME HASH + FAILED
+
+Regla publica:
+
+- reproducir el error historico correspondiente;
+- conservar `error.code` original cuando este disponible;
+- no reejecutar;
+- no transformar `FAILED` a `COMPLETED` por un exito posterior con otra key;
+- no generar un error generico `IDEMPOTENCY_FAILED`.
+
+### SAME KEY + DIFFERENT HASH
+
+Reglas:
+
+- devolver el error KEY_REUSED especifico del command;
+- no ejecutar efectos;
+- no exponer `request_hash` completo;
+- no intentar reinterpretar la solicitud como nueva.
+
+Codigos existentes:
+
+- `SALE_IDEMPOTENCY_KEY_REUSED`;
+- `RETURN_IDEMPOTENCY_KEY_REUSED`;
+- `ORDER_IDEMPOTENCY_KEY_REUSED`;
+- `PURCHASE_IDEMPOTENCY_KEY_REUSED`.
+
+### IN_PROGRESS vigente
+
+Reglas:
+
+- no ejecutar una segunda operacion concurrente para la misma key;
+- mantener el codigo IN_PROGRESS especifico del command;
+- no inventar todavia `Retry-After`;
+- no definir todavia estrategia publica de polling.
+
+Codigos existentes:
+
+- `SALE_IDEMPOTENCY_IN_PROGRESS`;
+- `RETURN_IDEMPOTENCY_IN_PROGRESS`;
+- `ORDER_IDEMPOTENCY_IN_PROGRESS`;
+- `PURCHASE_IDEMPOTENCY_IN_PROGRESS`.
+
+### NEW KEY / IN_PROGRESS RECOVERABLE
+
+No universalizar comportamiento.
+
+`CONFIRM_SALE`:
+
+- despues de idempotency lock y advisory lock por `(branch_id, client_operation_id)`, si ya existe `sales(branch_id, client_operation_id)`, prevalece la entidad existente;
+- se reconcilia la key actual a `COMPLETED`;
+- se devuelve la venta existente;
+- esto ocurre antes de validaciones posteriores de branch/terminal/user/permission;
+- Transport no agrega authorization-before-reconciliation.
+
+`CONFIRM_RETURN`:
+
+- misma regla conceptual con `returns(branch_id, client_operation_id)`;
+- la devolucion existente prevalece;
+- reconciliar key y devolverla antes de validaciones posteriores;
+- no imponer la regla de `CONFIRM_ORDER` / `CONFIRM_PURCHASE`.
+
+`CONFIRM_ORDER`:
+
+- para key nueva o `IN_PROGRESS` recuperable, current business/branch/auth debe validarse segun contrato frozen antes de reconciliacion historica permitida o nueva ejecucion.
+
+`CONFIRM_PURCHASE`:
+
+- para key nueva o `IN_PROGRESS` recuperable, current tenant/branch/user/`user_branches`/`PURCHASES_CONFIRM` debe validarse segun contrato frozen antes de reconciliacion o ejecucion.
+
+### Reconciliation publica
+
+Cuando una key nueva se reconcilia contra una entidad ya existente de `CONFIRM_SALE` / `CONFIRM_RETURN` por `client_operation_id`:
+
+- la respuesta publica debe representar la entidad historica existente;
+- no debe crear efectos adicionales;
+- no debe exponer PK internas;
+- no debe exponer datos cross-tenant;
+- no debe afirmar que fue una nueva venta/devolucion.
+
+No se define todavia un campo publico como:
+
+- `replayed`;
+- `reconciled`;
+- `idempotent_replay`.
+
+Si se considera util despues, debera ser otro micro-hito o parte del Command API.
+
+### Replay y envelopes
+
+Replay no crea un envelope distinto.
+
+Exito:
+
+```json
+{
+  "data": {}
+}
+```
+
+Error:
+
+```json
+{
+  "error": {}
+}
+```
+
+### Seguridad
+
+Replay/reconciliation no debe convertirse en canal para:
+
+- descubrir recursos de otro tenant;
+- exponer `request_hash`;
+- exponer `idempotency_key`;
+- exponer PK internas;
+- omitir reglas de visibilidad salvo donde el contrato frozen explicitamente ordene reconciliacion antes de validaciones posteriores.
+
+Este micro-hito no define:
+
+- HTTP status codes;
+- `Retry-After`;
+- headers adicionales de replay;
+- campo publico `replayed`/`reconciled`;
+- polling;
+- cache headers;
+- correlation/request ID;
+- auth provider;
+- OpenAPI;
+- framework/middleware.
+
+## 14. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
@@ -670,12 +824,11 @@ Este documento inicial no cierra:
 - algoritmo criptografico de `request_hash`;
 - mapping por categoria/codigo a HTTP status;
 - otros headers exactos de transporte;
-- politica de replay publica adicional donde exista margen;
 - correlation/request ID;
 - versionado de rutas;
 - OpenAPI.
 
-## 14. Fuera de alcance
+## 15. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -692,13 +845,12 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 15. Pendientes siguientes por micro-hitos
+## 16. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Replay publico compartido donde proceda.
-2. HTTP mapping.
-3. Correlation/request ID si se adopta.
-4. Command API contracts uno por uno.
+1. HTTP mapping.
+2. Correlation/request ID si se adopta.
+3. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
