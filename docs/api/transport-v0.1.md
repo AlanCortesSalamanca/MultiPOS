@@ -100,12 +100,58 @@ Los contratos actuales ya soportan estas restricciones, que este documento no de
 - errores publicos no deben filtrar SQL, stack, hashes completos, PK internas ni datos cross-tenant.
 - SAME TERMINAL KEY y reconciliation deben seguir semantica command-specific frozen; no inventar regla transversal.
 
-## 6. Decisiones todavia no cerradas
+## 6. Representacion decimal wire
+
+Los valores decimales exactos de dominio deben cruzar la frontera JSON como strings decimales, no como JSON numbers.
+
+Esta regla aplica conceptualmente a:
+
+- dinero;
+- cantidades base;
+- costos;
+- factores;
+- tasas/porcentajes decimales cuando el contrato de dominio los trate como `NUMERIC` exacto.
+
+Motivos:
+
+- evitar dependencia de floating point binario;
+- preservar semantica exacta compatible con PostgreSQL `NUMERIC`;
+- mantener comportamiento consistente entre clientes JavaScript, Flutter/Dart, .NET, Python u otros;
+- permitir representacion determinista para futuros DTOs y canonicalizacion de `request_hash`.
+
+Precisiones conceptuales heredadas:
+
+- dinero: `NUMERIC(18,2)`;
+- cantidades base: `NUMERIC(18,4)`;
+- costos/factores: `NUMERIC(18,6)`.
+
+Reglas de representacion publica:
+
+- en JSON publico, estos valores viajan como strings;
+- ejemplos validos conceptuales: `"1250.50"`, `"3.2500"`, `"18.123456"`;
+- no usar JSON number como representacion publica autoritativa para estos valores exactos;
+- no usar notacion cientifica en la representacion canonica futura;
+- el separador decimal es `.`;
+- no usar separadores de miles;
+- el signo negativo, cuando el campo de dominio lo permita, se representa con `-` inicial.
+
+Este micro-hito no define todavia:
+
+- reglas exactas de padding/trailing zeros por tipo;
+- normalizacion exacta para `request_hash`;
+- limites de validacion por campo;
+- rounding por operacion;
+- localizacion/UI;
+- representacion de porcentajes especificos;
+- serializador/framework.
+
+La wire representation no cambia precision/scale de dominio. Cada Command API decidira que campos decimales aparecen. Las reglas de redondeo siguen perteneciendo al contrato de dominio/transaccional correspondiente.
+
+## 7. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
-- decimal como string vs number;
 - formato decimal canonico;
 - representacion final de timestamp;
 - representacion enum;
@@ -123,7 +169,7 @@ Este documento inicial no cierra:
 - versionado de rutas;
 - OpenAPI.
 
-## 7. Fuera de alcance
+## 8. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -140,20 +186,19 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 8. Pendientes siguientes por micro-hitos
+## 9. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Representacion decimal wire.
-2. Timestamps.
-3. Enums.
-4. References publicas compartidas.
-5. Success/error envelopes.
-6. Idempotency/preconditions transport.
-7. Canonicalizacion wire para `request_hash`.
-8. Replay publico compartido donde proceda.
-9. HTTP mapping.
-10. Correlation/request ID si se adopta.
-11. Command API contracts uno por uno.
+1. Timestamps.
+2. Enums.
+3. References publicas compartidas.
+4. Success/error envelopes.
+5. Idempotency/preconditions transport.
+6. Canonicalizacion wire para `request_hash`.
+7. Replay publico compartido donde proceda.
+8. HTTP mapping.
+9. Correlation/request ID si se adopta.
+10. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
