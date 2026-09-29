@@ -406,7 +406,7 @@ Este micro-hito no define todavia:
 - por si solo, el HTTP mapping, cuya autoridad queda en la seccion especifica de `HTTP mapping compartido`;
 - otros headers;
 - `Retry-After`;
-- correlation/request ID;
+- por si solo, correlation/request ID, cuya autoridad queda en la seccion especifica de `Correlation/request ID compartido`;
 - tracing;
 - localization definitiva;
 - estructura concreta de `data` por command;
@@ -510,7 +510,7 @@ Este micro-hito no define:
 - por si solo, el replay publico adicional, cuya autoridad queda en la seccion especifica de `Replay publico compartido`;
 - por si solo, el HTTP mapping, cuya autoridad queda en la seccion especifica de `HTTP mapping compartido`;
 - `Retry-After`;
-- correlation/request ID;
+- por si solo, correlation/request ID, cuya autoridad queda en la seccion especifica de `Correlation/request ID compartido`;
 - auth headers;
 - JWT/bearer/cookies;
 - OpenAPI;
@@ -655,7 +655,7 @@ Este micro-hito no define:
 - salt;
 - HMAC;
 - por si solo, el HTTP mapping, cuya autoridad queda en la seccion especifica de `HTTP mapping compartido`;
-- correlation/request ID;
+- por si solo, correlation/request ID, cuya autoridad queda en la seccion especifica de `Correlation/request ID compartido`;
 - framework serializer;
 - OpenAPI.
 
@@ -809,7 +809,7 @@ Este micro-hito no define:
 - campo publico `replayed`/`reconciled`;
 - polling;
 - cache headers;
-- correlation/request ID;
+- por si solo, correlation/request ID, cuya autoridad queda en la seccion especifica de `Correlation/request ID compartido`;
 - auth provider;
 - OpenAPI;
 - framework/middleware.
@@ -998,7 +998,7 @@ Este micro-hito no define:
 - `WWW-Authenticate`;
 - cache headers;
 - auth headers;
-- correlation/request ID;
+- por si solo, correlation/request ID, cuya autoridad queda en la seccion especifica de `Correlation/request ID compartido`;
 - rate limiting;
 - 429 policies;
 - redirect semantics;
@@ -1007,7 +1007,165 @@ Este micro-hito no define:
 - OpenAPI;
 - framework exception handlers.
 
-## 15. Decisiones todavia no cerradas
+## 15. Correlation/request ID compartido
+
+Se adopta `X-Request-Id` como header publico compartido para correlacionar una solicitud HTTP con su respuesta y con observabilidad interna.
+
+`X-Request-Id` no es identidad de dominio.
+
+### Header publico
+
+Header:
+
+```http
+X-Request-Id: <opaque-value>
+```
+
+### Entrada
+
+El cliente puede enviar `X-Request-Id`.
+
+Si el cliente no lo envia, el backend genera uno.
+
+El backend debe devolver un `X-Request-Id` valido en toda respuesta HTTP que la capa API/HTTP pueda construir.
+
+### Naturaleza
+
+`X-Request-Id`:
+
+- es un identificador de transporte/observabilidad;
+- no es `idempotency_key`;
+- no es `client_operation_id`;
+- no es `public_id`;
+- no es `business_id`;
+- no forma parte del payload de dominio;
+- no forma parte de `request_hash`;
+- no autoriza;
+- no determina tenant/branch/user.
+
+### Confianza del valor recibido
+
+El valor enviado por cliente debe tratarse como input no confiable.
+
+El backend puede aceptarlo y propagarlo solo si cumple la validacion publica definida por Transport.
+
+Si es ausente o invalido, generar uno nuevo en vez de fallar el command unicamente por ese motivo.
+
+No convertir un request ID invalido en error de dominio.
+
+### Formato publico minimo
+
+Reglas:
+
+- ASCII visible;
+- longitud de 1 a 128 caracteres;
+- sin espacios;
+- sin caracteres de control;
+- sin CR/LF;
+- tratarlo como valor opaco;
+- case-sensitive;
+- no imponer UUID/ULID.
+
+No definir semantica interna a partir de su estructura.
+
+### Generacion backend
+
+Cuando el backend genere el valor:
+
+- debe ser suficientemente unico para correlacion operacional;
+- no debe contener informacion sensible;
+- no debe codificar `user_id`, `business_id`, `branch_id`, PK internas, timestamps sensibles ni datos de dominio.
+
+No se fija todavia una libreria concreta.
+
+UUID v4 o equivalente seria una implementacion valida, pero UUID no es obligatorio en el contrato publico.
+
+### Response
+
+Toda respuesta HTTP que la capa API/HTTP pueda construir debe devolver:
+
+```http
+X-Request-Id: <value>
+```
+
+Incluye conceptualmente:
+
+- exito;
+- replay;
+- errores de dominio;
+- errores de autorizacion;
+- errores de validacion;
+- errores tecnicos, siempre que la capa HTTP haya podido construir una respuesta.
+
+La response debe devolver el request ID aceptado del cliente o el generado por backend para esa solicitud.
+
+### Error envelope
+
+No agregar `request_id` dentro del JSON error envelope por ahora.
+
+La autoridad publica para este micro-hito es el header `X-Request-Id`.
+
+Evitar duplicarlo en body y header sin necesidad.
+
+### Logging/observabilidad
+
+Internamente, el backend debe poder asociar el mismo request ID a logs/eventos de esa solicitud.
+
+Este documento no define:
+
+- formato de logs;
+- tracing spans;
+- `trace_id`/`span_id`;
+- OpenTelemetry;
+- propagacion entre microservicios;
+- storage/retention de logs;
+- dashboards.
+
+### Seguridad
+
+Nunca confiar en `X-Request-Id` como prueba de identidad.
+
+No exponer mediante su valor:
+
+- secretos;
+- tokens;
+- PK internas;
+- tenant IDs sensibles;
+- user IDs;
+- informacion de infraestructura.
+
+Evitar log injection validando el header antes de propagarlo.
+
+### Request hash
+
+`X-Request-Id` no forma parte de `request_hash`.
+
+Dos requests semanticamente identicos con request IDs distintos deben producir el mismo `request_hash` si todos los datos semanticos son iguales.
+
+### Idempotencia
+
+Cambiar `X-Request-Id` no crea una operacion nueva.
+
+No sustituye `Idempotency-Key`.
+
+Un replay puede tener un `X-Request-Id` distinto al request original porque identifica la solicitud HTTP actual, no la operacion historica.
+
+Este micro-hito no define:
+
+- W3C `traceparent`;
+- `trace_id`/`span_id`;
+- OpenTelemetry;
+- distributed tracing;
+- correlation entre servicios externos;
+- `Retry-After`;
+- auth headers;
+- CORS;
+- rate limiting;
+- OpenAPI;
+- middleware concreto;
+- framework concreto.
+
+## 16. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
@@ -1016,11 +1174,10 @@ Este documento inicial no cierra:
 - formato, longitud y generacion de `idempotency_key`;
 - algoritmo criptografico de `request_hash`;
 - otros headers exactos de transporte;
-- correlation/request ID;
 - versionado de rutas;
 - OpenAPI.
 
-## 16. Fuera de alcance
+## 17. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -1037,11 +1194,10 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 17. Pendientes siguientes por micro-hitos
+## 18. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Correlation/request ID si se adopta.
-2. Command API contracts uno por uno.
+1. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
