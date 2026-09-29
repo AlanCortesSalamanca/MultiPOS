@@ -433,8 +433,12 @@ Queda explicitamente fuera de este documento:
 
 Despues de este documento:
 
-1. API Authorization / Context v0.1.
-2. Wire-format / transport conventions.
-3. Command API contracts.
+1. `Wire-format / Transport Conventions v0.1`.
+2. Command API contracts, uno por uno:
+   - `CONFIRM_SALE`.
+   - `CONFIRM_RETURN`.
+   - `CONFIRM_ORDER`.
+   - `CONFIRM_PURCHASE`.
+3. DTOs/mapping publicos concretos por command cuando corresponda.
 
 No se desarrollan aqui.
