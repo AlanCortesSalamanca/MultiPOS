@@ -206,13 +206,57 @@ Este micro-hito no define todavia:
 
 Restriccion heredada: `confirmed_at`, `closed_at`, `occurred_at` y timestamps autoritativos equivalentes no son determinados libremente por cliente cuando el contrato de dominio indique que los genera backend.
 
-## 8. Decisiones todavia no cerradas
+## 8. Representacion wire de enums
+
+Los valores enum que crucen la frontera publica deben representarse como JSON strings usando exactamente el vocabulario de dominio frozen correspondiente.
+
+Wire type:
+
+- JSON string.
+
+Reglas:
+
+- el valor publico debe usar exactamente el simbolo de dominio congelado;
+- la comparacion de enum values es case-sensitive;
+- la API no debe traducir enum values;
+- la API no debe cambiar mayusculas/minusculas;
+- la API no debe reemplazar simbolos por labels de UI;
+- la API no debe inventar aliases silenciosos;
+- la API no debe aceptar valores desconocidos fuera del vocabulario permitido por el contrato correspondiente.
+
+Ejemplos conceptuales validos cuando pertenezcan al vocabulario frozen:
+
+- `"CONFIRMED"`;
+- `"CASH"`;
+- `"RESTOCK"`.
+
+Ejemplos conceptuales que no deben usarse como sustitutos del valor de dominio:
+
+- `"Confirmed"`;
+- `"confirmado"`;
+- `"cash"`;
+- labels localizados de interfaz.
+
+La localizacion/traduccion visible pertenece al frontend/UI, no al valor transportado.
+
+Este micro-hito no define todavia:
+
+- un catalogo global nuevo de enums;
+- copia de todos los enums de db-4;
+- que enums aparecen en cada Command API;
+- como documentarlos en OpenAPI;
+- fallback para valores futuros;
+- versionado de enums;
+- cambios a vocabularios frozen existentes.
+
+Cada Command API define que campos enum aparecen. El vocabulario autoritativo proviene del contrato/modelo correspondiente. Transport solo define su representacion compartida.
+
+## 9. Decisiones todavia no cerradas
 
 Este documento inicial no cierra:
 
 - JSON media type exacto si corresponde;
 - formato decimal canonico;
-- representacion enum;
 - success envelope;
 - error envelope JSON definitivo;
 - transporte exacto de `idempotency_key`;
@@ -227,7 +271,7 @@ Este documento inicial no cierra:
 - versionado de rutas;
 - OpenAPI.
 
-## 9. Fuera de alcance
+## 10. Fuera de alcance
 
 Queda fuera de alcance:
 
@@ -244,18 +288,17 @@ Queda fuera de alcance:
 - implementacion de middleware;
 - implementacion de logging/telemetry.
 
-## 10. Pendientes siguientes por micro-hitos
+## 11. Pendientes siguientes por micro-hitos
 
 Secuencia recomendada para micro-hitos posteriores:
 
-1. Enums.
-2. References publicas compartidas.
-3. Success/error envelopes.
-4. Idempotency/preconditions transport.
-5. Canonicalizacion wire para `request_hash`.
-6. Replay publico compartido donde proceda.
-7. HTTP mapping.
-8. Correlation/request ID si se adopta.
-9. Command API contracts uno por uno.
+1. References publicas compartidas.
+2. Success/error envelopes.
+3. Idempotency/preconditions transport.
+4. Canonicalizacion wire para `request_hash`.
+5. Replay publico compartido donde proceda.
+6. HTTP mapping.
+7. Correlation/request ID si se adopta.
+8. Command API contracts uno por uno.
 
 No se desarrolla ninguna de esas decisiones en este documento inicial.
