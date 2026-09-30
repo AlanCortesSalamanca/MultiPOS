@@ -4,7 +4,7 @@
 - Version: v0.1
 - Implementacion: no iniciada
 
-Este documento **todavia NO esta FROZEN**. Define la frontera HTTP publica del command `CONFIRM_SALE`; las decisiones pendientes de la seccion 13 no se consideran cerradas.
+Este documento **todavia NO esta FROZEN**. Define la frontera HTTP publica del command `CONFIRM_SALE`; el cierre de sus decisiones documentales no equivale a declarar el documento congelado.
 
 ## 1. Objetivo y autoridad
 
@@ -13,6 +13,12 @@ Este contrato adapta a una interfaz HTTP publica concreta el command transaccion
 La autoridad de negocio es `docs/transactions/confirmar-venta-v0.1.md`. Las autoridades compartidas de identidad/frontera, authorization/context, error model, idempotencia y transporte se aplican conforme a los documentos referenciados abajo. El modelo fisico vigente es db-4.
 
 Este documento no modifica ni sustituye ninguna autoridad frozen.
+
+### 1.1 Precedencia de la regla especifica de CONFIRM_SALE
+
+`docs/api/idempotency-and-preconditions-v0.1.md` §18 contiene una regla general compartida sobre autorizacion/reconciliacion historica, con margen para la semantica frozen de cada command. Para `CONFIRM_SALE`, la regla especifica gobierna este flujo: Transaction §§4,6, Authorization & Context §§12,14 y Transport §13 establecen que la barrera `(branch_id, client_operation_id)`, la busqueda de `sales(branch_id, client_operation_id)` y la reconciliacion de una venta existente ocurren antes de las validaciones posteriores de branch activa, terminal activa, terminal/branch, user ACTIVE, `user_branches` y `SALES_CONFIRM`.
+
+La regla general no debe reinterpretar esta precedencia como `authorization-before-reconciliation`. La diferencia entre regla general y regla especifica se documenta unicamente en este Command API; no se modifica ningun contrato base ni la secuencia frozen.
 
 ## 2. Fuentes autoritativas
 
@@ -64,6 +70,20 @@ El envelope de exito y error sigue Transport v0.1. El HTTP `200` se utiliza para
 
 No se define header de autenticacion ni otro header command-specific.
 
+### 3.2 Frontera publica de autenticacion para historia
+
+Este Command API adopta como **decision publica command-specific v0.1**:
+
+```text
+AUTHENTICATION_GATE_BEFORE_RECONCILIATION = true
+```
+
+Es una decision de frontera/exposicion, no una validacion frozen previa ni autorizacion funcional del command. Requiere una solicitud autenticada y el contexto confiable minimo de la seccion 4; no mueve `USER_INACTIVE`, `user_branches`, `SALES_CONFIRM`, terminal ACTIVE ni otros checks actuales antes de reconciliacion.
+
+Una solicitud completamente no autenticada recibe `AUTHENTICATION_REQUIRED`, categoria `AUTHENTICATION`, HTTP `401`, `retryable=false`; no recibe informacion historica. La frontera minima se exige en cada solicitud HTTP, tambien para SAME KEY terminal `COMPLETED`/`FAILED`, sin exigir un nuevo login ni reautorizacion del command. No reetiquetar un usuario o terminal inactivo como `AUTHENTICATION_REQUIRED` para adelantar indirectamente sus validaciones.
+
+Esta decision no define provider, mecanismo/header de autenticacion, JWT, bearer, cookie ni OAuth/OIDC.
+
 ## 4. Contexto, referencias y modos del request
 
 El request distingue dos formas mutuamente excluyentes. No se envia un campo `mode`: la presencia de `quotation_public_id` selecciona `QUOTATION SALE`; su ausencia selecciona `DIRECT SALE`.
@@ -83,6 +103,10 @@ Contexto derivado/autenticado:
 - `business`: del contexto autenticado/branch segun el flujo frozen; nunca selector libre del body.
 - `user`: actor autenticado.
 - `terminal`: terminal autenticada, no caller input.
+
+El contexto confiable minimo previo a replay/reconciliacion debe permitir establecer unicamente actor autenticado, identidad autenticada/contextual de terminal POS, `business_id` confiable y scope fisico `(business_id, 'CONFIRM_SALE', Idempotency-Key)`. Conocer la identidad de la terminal no equivale a validarla actualmente para ejecutar una venta nueva.
+
+`business_id` puede provenir del contexto autenticado confiable. No viene del body, no se deriva de `Idempotency-Key` ni de un `branch_public_id` encontrado globalmente. Cuando el diseno futuro necesite derivarlo mediante terminal, la relacion es terminal conocida -> branch persistida de esa terminal -> business; esa derivacion lee identidad/pertenencia unicamente. No valida terminal ACTIVE, igualdad con la branch objetivo, USER_INACTIVE, `user_branches` ni `SALES_CONFIRM`. No se elige aqui el mecanismo tecnico de autenticacion/contexto.
 
 ### 4.1 Referencias publicas
 
@@ -106,6 +130,10 @@ Estas referencias no autorizan acceso. Persisten las validaciones de tenant, bra
 Resolver referencias publicas exclusivamente dentro del scope visible determinado por contexto confiable. La referencia del caller no amplia tenant/business/branch ni permite derivar el scope desde un recurso encontrado globalmente.
 
 Una referencia inexistente y una referencia fuera del scope visible producen la misma respuesta publica de no-resolucion. No hacer lookup global posterior para distinguirlas. No revelar el recurso oculto ni su tenant/business/branch mediante `message`, `details`, status u otro side channel contractual.
+
+Para NEW KEY o `IN_PROGRESS` recuperable que necesite entrar a la barrera historica, la resolucion minima de `branch_public_id` comprueba unicamente public_id y pertenencia al business confiable ya establecido. No filtrar por branch ACTIVE, `user_branches`, `SALES_CONFIRM` ni terminal/branch compatibility. Si no resuelve en ese scope, devolver `REFERENCE_NOT_FOUND`, `NOT_FOUND_VISIBILITY`, HTTP `404`, `retryable=false`, sin lookup global posterior. Si resuelve, usar `branch_id` para la barrera y `sales(branch_id, client_operation_id)`; esto es resolucion de identidad/scope, no autorizacion funcional.
+
+Esta resolucion de branch solo se requiere cuando la ruta NEW/RECOVERABLE necesita la barrera. No volver a resolver `branch_public_id` ni las demas referencias del payload para SAME KEY + SAME HASH terminal `COMPLETED`/`FAILED`, conforme a la seccion 9.1.
 
 | Input publico | Condicion | `error.code` | `category` | HTTP | `retryable` |
 |---|---|---|---|---:|---|
@@ -273,6 +301,8 @@ En particular, propiedad ausente y `null` no son equivalentes en canonicalizacio
 
 El limite publico no cambia `sales.client_operation_id TEXT` en db-4.
 
+`client_operation_id` es identidad logica, no autorizacion. Con una key distinta, `(branch_id, client_operation_id)` identifica la posible venta historica; las condiciones de reconciliacion se describen en la seccion 9.2.
+
 ## 8. Orden de arrays y canonicalizacion de `request_hash`
 
 `request_hash` representa el payload semantico canonico. Aplican reglas frozen Transport para UTF-8, orden determinista de propiedades de objetos, arrays, strings, decimales, tipos y serializacion. `Idempotency-Key`, `X-Request-Id`, auth headers, PK internas y valores generados por backend nunca son parte del hash.
@@ -376,6 +406,8 @@ La key es obligatoria y distinta de `client_operation_id`.
 
 ### 9.1 Resolucion inicial de key
 
+Toda solicitud debe cumplir la frontera HTTP/contextual minima de las secciones 3.2 y 4 y el formato de key/request necesario para interpretar/canonicalizar. Construir `request_hash` conforme a la seccion 8 y resolver la key en el business confiable; comparar hash antes de aplicar el tratamiento por estado. No resolver referencias del payload para construir el hash.
+
 - Misma key y hash distinto, en cualquier estado: `SALE_IDEMPOTENCY_KEY_REUSED`; no ejecutar efectos ni exponer hashes.
 - Misma key/hash y `IN_PROGRESS` vigente: `SALE_IDEMPOTENCY_IN_PROGRESS`. No esperar bloqueado por el lease; el caller puede reintentar posteriormente.
 - `COMPLETED` con mismo hash: replay exitoso, sin repetir efectos ni crear otra venta.
@@ -384,28 +416,88 @@ La key es obligatoria y distinta de `client_operation_id`.
 
 Leases y retencion no cambian: `IN_PROGRESS` usa lease de 30 segundos; `COMPLETED` y `FAILED` retienen 30 dias. `expires_at` no es mecanismo de locking.
 
+#### 9.1.1 SAME KEY + SAME HASH + COMPLETED
+
+1. Exigir unicamente la frontera HTTP/contextual minima.
+2. Validar el formato de key/request necesario para interpretar/canonicalizar.
+3. Construir `request_hash`.
+4. Resolver la key dentro del business confiable.
+5. Comparar hash.
+6. Con mismo hash y `COMPLETED`, devolver HTTP `200` y el resultado historico de la seccion 11.
+
+La key terminal y su asociacion persistida son suficientes para replay dentro de la frontera confiable. No volver a resolver `branch_public_id`, cash session, customer, price list, products/units, quotation ni payment methods. No revalidar branch ACTIVE, terminal ACTIVE, terminal/branch, USER_INACTIVE, `user_branches`, `SALES_CONFIRM`, stock ni estado comercial actual. No repetir efectos.
+
+Reconstruir el DTO desde la asociacion persistida cuando corresponda no equivale a revalidar el command. Key terminal significa estado `COMPLETED`/`FAILED`, no obligacion de utilizar la misma terminal POS fisica.
+
+#### 9.1.2 SAME KEY + SAME HASH + FAILED
+
+Exigir la misma frontera HTTP/contextual minima, validar el formato necesario, construir el hash, resolver la key en su business confiable y comparar hash. Con mismo hash y `FAILED`, reproducir el error historico original y conservar `error.code`, category, HTTP y retryability correspondientes.
+
+No reejecutar, resolver nuevamente referencias del payload ni revalidar autorizacion/estado actual. No buscar una sale para reemplazar `FAILED` por exito ni convertir la key a `COMPLETED` porque otra key haya completado luego.
+
+`AUTHENTICATION_REQUIRED` puede impedir aceptar la solicitud HTTP antes del replay. Una vez aceptada, no sustituir el error historico por una autorizacion actual.
+
 ### 9.2 NEW KEY / `IN_PROGRESS` RECOVERABLE
 
 Preservar exactamente esta precedencia:
 
-1. Resolver idempotencia inicial.
-2. Para key nueva o recuperable, verificar propiedad/estado de la key segun contrato frozen.
-3. Aplicar la barrera/secuencia frozen por `(branch_id, client_operation_id)`.
-4. Buscar `sales(branch_id, client_operation_id)`.
-5. Si existe la venta:
-   - la venta historica prevalece;
-   - reconciliar la key actual a `COMPLETED` y asociarla a esa venta conforme al contrato transaccional;
-   - no repetir efectos, movimientos, folio, pagos, caja ni reposicion;
-   - devolver success historico de esa venta.
-6. Solamente si la venta no existe, continuar validaciones command-specific y efectos conforme al contrato transaccional.
+1. Exigir la frontera HTTP/contextual minima de la seccion 3.2.
+2. Establecer el business confiable conforme a la seccion 4.
+3. Construir `request_hash` conforme a la seccion 8.
+4. Resolver/reservar idempotencia conforme a la seccion 9.1 y al contrato frozen.
+5. Aplicar los controles frozen de hash/status/lease/ownership y el lock de idempotencia correspondiente. Un lease expirado no basta para autorizar recuperacion ni otra ejecucion concurrente.
+6. Resolver branch dentro del business confiable cuando sea necesario para entrar a la barrera, conforme a la seccion 4.2.
+7. Aplicar la barrera/secuencia frozen por `(branch_id, client_operation_id)`.
+8. Buscar `sales(branch_id, client_operation_id)`.
+9. Si existe la venta:
+    - la venta historica prevalece;
+    - no comparar el payload actual contra la sale, revalidar lines/payments ni resolver/revalidar recursos actuales;
+    - reconciliar la key actual a `COMPLETED`, con `result_entity_type='sales'` y `result_entity_id` de esa venta conforme al contrato transaccional;
+    - guardar `response_body` interna minima, limpiar el lease con `locked_until=NULL` y establecer la retencion con `expires_at=now()+30 dias` segun frozen;
+    - no repetir efectos, movimientos, folio, pagos, caja ni reposicion;
+    - completar la transaccion controlada conforme al contrato frozen;
+    - devolver HTTP `200` y el DTO historico de esa venta.
+10. Solamente si la venta no existe, continuar validaciones actuales command-specific y efectos conforme al contrato transaccional.
 
 La reconciliacion ocurre antes de las validaciones posteriores de branch, terminal, user, `user_branches` y permiso `SALES_CONFIRM`. **No se aplica authorization-before-reconciliation.**
 
-La resolucion de contexto/referencias necesaria para entrar en la secuencia no equivale a adelantar dichas validaciones. La politica publica adicional para una reconciliacion historica se limita a lo que permiten los contratos frozen; este borrador no impone una reautorizacion que los contradiga.
+La frontera publica de autenticacion/contexto no equivale a adelantar las validaciones actuales del command. La precedencia especifica de la seccion 1.1 gobierna esta ruta; las comprobaciones previas permitidas se delimitan en la seccion 9.3.
 
 Las referencias se resuelven conforme al scope visible de la seccion 4, en el punto que corresponda a la secuencia frozen. No adelantar validaciones de catalogos, caja o cotizacion para sustituir un replay/reconciliacion por un error actual de esos recursos.
 
 Una key distinta con el mismo `(branch, client_operation_id)` tambien devuelve la venta ya existente; no se infiere igualdad de payload desde `sales`, que no almacena `request_hash`.
+
+No exigir mismo actor historico, misma terminal historica ni igualdad de payload entre keys diferentes. El `request_hash` protege la key actual; no actua como fingerprint almacenado de `sales`. `client_operation_id` no sustituye autenticacion ni la frontera confiable de business.
+
+### 9.3 Comprobaciones publicas antes de reconciliacion
+
+La validez syntactic/wire previa es la necesaria para interpretar/canonicalizar conforme al contrato. No incluye resolver recursos ni comprobar reglas economicas o estado actual del command. La representacion publica de una referencia puede formar parte del hash sin resolverla a una PK interna.
+
+| Comprobacion | Antes de reconciliacion | Alcance / razon |
+|---|---|---|
+| Request syntactic/wire validity | REQUIRED BEFORE RECONCILIATION | Representacion necesaria para interpretar/canonicalizar; no validacion economica ni de recursos persistidos |
+| Idempotency-Key validity | REQUIRED BEFORE RECONCILIATION | Header obligatorio y formato publico valido |
+| Authentication presence | REQUIRED BEFORE RECONCILIATION | Identidad/sesion autenticada utilizable; no historia anonima |
+| Business context | REQUIRED BEFORE RECONCILIATION | Define scope de key y frontera minima de branch |
+| branch_public_id resolution | REQUIRED BEFORE RECONCILIATION, solo para NEW/RECOVERABLE cuando necesita la barrera | Public_id y pertenencia al business confiable; no se vuelve a resolver para SAME KEY terminal COMPLETED/FAILED |
+| client_operation_id format | REQUIRED BEFORE RECONCILIATION | Forma parte del payload canonico y de la identidad logica de busqueda |
+| request_hash construction | REQUIRED BEFORE RECONCILIATION | Protege la key actual, sin resolver catalogos |
+| Terminal identity/context presence | REQUIRED BEFORE RECONCILIATION | Terminal conocida como contexto POS, sin validar estado operativo actual |
+| Branch ACTIVE | NOT VALIDATED BEFORE RECONCILIATION | Validacion posterior de aptitud para ejecucion nueva |
+| Terminal ACTIVE | NOT VALIDATED BEFORE RECONCILIATION | Identidad conocida no equivale a terminal actualmente operativa |
+| Terminal/branch compatibility | NOT VALIDATED BEFORE RECONCILIATION | Relacion con branch objetivo validada solo si no existe sale historica |
+| User ACTIVE | NOT VALIDATED BEFORE RECONCILIATION | Autorizacion actual del command, distinta de autenticacion |
+| user_branches | NOT VALIDATED BEFORE RECONCILIATION | No se usa como filtro anticipado de historia |
+| SALES_CONFIRM | NOT VALIDATED BEFORE RECONCILIATION | Permiso y roles actuales posteriores a descartar sale historica |
+| Cash session resolution/state | NOT NEEDED BEFORE RECONCILIATION | No resolver ni comprobar OPEN para devolver historia |
+| Customer | NOT NEEDED BEFORE RECONCILIATION | No resolver ni validar cliente actual |
+| Price list | NOT NEEDED BEFORE RECONCILIATION | No resolver ni validar lista actual |
+| Products/units | NOT NEEDED BEFORE RECONCILIATION | No resolver presentaciones ni validar actividad/compatibilidad actual |
+| Quotation | NOT NEEDED BEFORE RECONCILIATION | No resolver ni validar vigencia, estado o matching de lineas |
+| Payment methods | NOT NEEDED BEFORE RECONCILIATION | No resolver metodos/canales ni revalidar pagos |
+| Stock | NOT NEEDED BEFORE RECONCILIATION | No bloquear ni revalidar inventario de una venta ya materializada |
+
+Para SAME KEY terminal COMPLETED/FAILED, la frontera HTTP/contextual minima y la comparacion de hash bastan antes del replay; no se ejecutan las comprobaciones de recursos/estado del command ni la resolucion de branch necesaria para la barrera NEW/RECOVERABLE.
 
 ## 10. Secuencia de contexto y autorizacion
 
@@ -413,13 +505,15 @@ Separar explicitamente:
 
 ### A. Contexto autenticado/derivado
 
-- Business/tenant: contexto autenticado/branch; no body input.
+- Business/tenant: contexto confiable minimo de la seccion 4; no body input ni tenant derivado de un selector encontrado globalmente.
 - User actor: autenticado; alimenta autorizacion y audit.
 - Terminal: autenticada; requerida para venta, no body input.
 - Branch target: `branch_public_id` del body.
 - Cash session: `cash_session_public_id` del body.
 
 Obtener contexto autenticado y resolver las referencias necesarias para la secuencia no es una orden para evaluar primero los permisos command-specific. El orden frozen de idempotencia y reconciliacion prevalece.
+
+La autenticacion minima de la seccion 3.2 permite aceptar la solicitud HTTP y establecer identidad/scope; USER_INACTIVE, `user_branches`, `SALES_CONFIRM`, terminal ACTIVE y terminal/branch permanecen como validaciones actuales posteriores cuando no existe sale historica.
 
 ### B. Inputs publicos
 
@@ -458,6 +552,12 @@ Toda confirmacion nueva, replay `COMPLETED` y reconciliacion exitosa usa HTTP `2
 Si posteriormente el estado actual de `sales` cambia por una devolucion o cancelacion, un replay/reconciliacion conserva `status: "CONFIRMED"` como resultado historico de la confirmacion. No sustituirlo por `PARTIALLY_RETURNED`, `RETURNED`, `CANCELLED` u otro estado posterior.
 
 Este DTO es igual en confirmacion nueva, replay `COMPLETED` y reconciliacion por `client_operation_id`. No se agregan `replayed`, `reconciled` ni `idempotent_replay`. `idempotency_keys.response_body` es almacenamiento interno y no equivale automaticamente al DTO publico.
+
+La exposicion historica se limita exactamente a los seis campos existentes: `sale_public_id`, `folio`, `status='CONFIRMED'`, `total`, `currency` y `confirmed_at`. No agregar actor historico, customer, lines, payments, PK internas ni `request_hash`.
+
+Dentro del business confiable, una reconciliacion historica puede devolver este resumen aunque el actor actualmente no tenga `user_branches` o `SALES_CONFIRM`, o aunque terminal/branch esten inactivas, porque esas validaciones actuales estan despues de la barrera frozen. Este alcance aplica solamente al resumen historico del command y no crea una API general de consulta de ventas.
+
+Cross-tenant queda prohibido por el business confiable, el scope fisico de la key y la resolucion scoped de branch cuando aplica. La asociacion persistida y la reconstruccion del DTO deben conservar esa frontera; conocer referencias o `client_operation_id` no autoriza una respuesta anonima ni acceso a otro business.
 
 ## 12. Errores
 
@@ -528,15 +628,47 @@ Se adoptan explicitamente los cuatro codigos de `public-error-codes-v0.1.md`:
 - `INTERNAL_ERROR.retryable=false` no promete que se reconocio una condicion transitoria y no altera la recuperacion idempotente frozen.
 - `X-Request-Id` ausente/invalido se sustituye por uno generado y no es error del command.
 
+### 12.2 Errores previos a reconciliacion y replay FAILED
+
+Sin modificar las clasificaciones ya cerradas, estos errores pueden aparecer legitimamente antes de reconciliacion:
+
+| `error.code` | HTTP | Condicion previa permitida |
+|---|---:|---|
+| `REQUEST_VALIDATION_FAILED` | 422 | Request/header invalido en la frontera cuando no existe codigo especifico; incluye key ausente/invalida |
+| `AUTHENTICATION_REQUIRED` | 401 | No existe identidad/sesion autenticada utilizable para la frontera minima |
+| `REFERENCE_NOT_FOUND` | 404 | Unicamente branch no resoluble dentro del business confiable para NEW/RECOVERABLE cuando necesita entrar a la barrera |
+| `SALE_IDEMPOTENCY_KEY_REUSED` | 409 | Key del scope confiable con hash distinto, antes de aplicar su estado |
+| `SALE_IDEMPOTENCY_IN_PROGRESS` | 409 | Operacion activa o todavia no recuperable con seguridad |
+| `INTERNAL_ERROR` | 500 por defecto | Fallo tecnico previo cuando la capa HTTP puede construir una respuesta segura |
+
+No resolver anticipadamente cash session, customer, lista, productos/unidades, quotation ni payment methods para bloquear replay/reconciliacion. La validez wire necesaria no se convierte en validacion economica adelantada; se conserva la prioridad de codigos especificos sobre fallbacks.
+
+Excepcion: SAME KEY + SAME HASH + `FAILED` puede devolver historicamente `USER_PERMISSION_DENIED`, `PRODUCT_INACTIVE` u otro codigo original. Eso no significa que esa validacion actual se ejecuto antes de reconciliacion: es replay del error historico conforme a la seccion 9.1.2.
+
+### 12.3 Errores actuales posteriores cuando no existe sale historica
+
+Solo cuando no existe sale historica continuan las validaciones actuales en su orden frozen y pueden producir:
+
+- Branch, terminal y autorizacion: `BRANCH_INACTIVE`, `TERMINAL_INACTIVE`, `TERMINAL_BRANCH_MISMATCH`, `USER_INACTIVE`, `USER_BRANCH_FORBIDDEN`, `USER_PERMISSION_DENIED`.
+- Caja: `CASH_SESSION_REQUIRED`, `CASH_SESSION_CLOSED`, `CASH_SESSION_TERMINAL_MISMATCH`.
+- Cliente/lista: `CUSTOMER_INACTIVE`, `CUSTOMER_BUSINESS_MISMATCH`, `PRICE_LIST_INACTIVE`, `PRICE_LIST_BUSINESS_MISMATCH`.
+- Productos/unidades/precios/calculos: `PRODUCT_INACTIVE`, `PRODUCT_BUSINESS_MISMATCH`, `PRODUCT_UNIT_INVALID`, `PRICE_NOT_FOUND`, `PRICE_CHANGED`, `INVALID_QUANTITY`, `INVALID_DISCOUNT`, `INVALID_TAX_CALCULATION`.
+- Stock: `INSUFFICIENT_STOCK`.
+- Pagos/canal: `PAYMENT_METHOD_INACTIVE`, `PAYMENT_TOTAL_MISMATCH`, `MIXED_REPLENISHMENT_CHANNELS`.
+- Folios: `DOCUMENT_SEQUENCE_NOT_FOUND`, `DOCUMENT_SEQUENCE_INACTIVE`.
+- Cotizacion: `QUOTATION_NOT_FOUND`, `QUOTATION_BRANCH_MISMATCH`, `QUOTATION_EXPIRED`, `QUOTATION_ALREADY_CONVERTED`, `QUOTATION_STATUS_INVALID`.
+
+Esta agrupacion no altera el orden de locks/validaciones frozen. No ejecutar estas validaciones actuales unicamente para decidir si debe devolverse una venta historica. La no-resolucion actual de referencias distintas de branch tambien pertenece a la ruta de ejecucion nueva, sin cambiar su mapping ni la semantica FAILED de las tablas anteriores.
+
 ## 13. Pendientes antes de freeze
 
 Category/HTTP, retryable publico, semantica unica de `PRODUCT_UNIT_INVALID`, codigos genericos, referencias no resolubles y mismatch visibility policy quedan cerrados en este borrador mediante las secciones 4 y 12 y la adopcion del catalogo aditivo compartido.
 
-Permanece pendiente cerrar la politica publica adicional de exposicion/auth en reconciliacion historica, unicamente en los aspectos no cubiertos por la resolucion scoped y donde las autoridades frozen dejan margen. La politica de referencias/mismatches no equivale a cerrar toda esa politica adicional. No puede cambiar el orden frozen, introducir `authorization-before-reconciliation` ni agregar reautorizacion/revalidacion transversal de una key terminal.
+El pendiente de politica publica adicional de exposicion/auth en reconciliacion historica queda cerrado por la decision publica command-specific v0.1 adoptada en las secciones 1.1, 3.2, 4, 9, 10, 11 y 12. No quedan decisiones documentales pendientes de este bloque antes de freeze: la frontera minima no cambia el orden frozen, no introduce `authorization-before-reconciliation` y no agrega reautorizacion/revalidacion del command para una key terminal.
 
-El documento sigue `BORRADOR CONTROLADO`; este cierre del error contract no lo declara FROZEN.
+El documento sigue `BORRADOR CONTROLADO`; este cierre documental no lo declara FROZEN.
 
-Algoritmo criptografico, libreria de canonicalizacion, backend, framework, middleware, auth provider, SQL, logging, deployment y OpenAPI siguen diferidos a implementacion/otros hitos y no son pendientes de freeze de este contrato.
+Provider concreto, mecanismo/header de autenticacion, implementacion de contexto, algoritmo/libreria de hash y canonicalizacion, implementacion de locks, backend, framework, middleware, SQL, logging, deployment, OpenAPI y los demas elementos ya fuera de alcance siguen diferidos a implementacion/otros hitos. No son blockers ni pendientes de freeze de este contrato.
 
 ## 14. Fuera de alcance
 
