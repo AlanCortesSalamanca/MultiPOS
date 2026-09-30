@@ -4,7 +4,7 @@
 - Version: v0.1
 - Implementacion: no iniciada
 
-Este documento **todavia NO esta FROZEN**. Define la frontera HTTP publica del command `CONFIRM_SALE`; las decisiones marcadas `PENDIENTE ANTES DE FREEZE` no se consideran cerradas.
+Este documento **todavia NO esta FROZEN**. Define la frontera HTTP publica del command `CONFIRM_SALE`; las decisiones pendientes de la seccion 13 no se consideran cerradas.
 
 ## 1. Objetivo y autoridad
 
@@ -26,6 +26,9 @@ Este documento no modifica ni sustituye ninguna autoridad frozen.
 - `docs/api/error-model-v0.1.md`
 - `docs/api/idempotency-and-preconditions-v0.1.md`
 - `docs/api/transport-v0.1.md`
+- `docs/api/public-error-codes-v0.1.md`
+
+`public-error-codes-v0.1.md` es la autoridad aditiva compartida de los cuatro fallbacks publicos adoptados aqui. No sustituye codigos frozen especificos ni redefine las autoridades base.
 
 `TAX SNAPSHOT v1` tuvo primera adopcion contractual en `CONFIRM_PURCHASE`; este contrato no lo adopta como input de SALE.
 
@@ -49,7 +52,8 @@ El envelope de exito y error sigue Transport v0.1. El HTTP `200` se utiliza para
 - Se transporta exclusivamente como header y no aparece en el JSON body.
 - Formato frozen Transport: un valor opaco ASCII visible (`0x21`–`0x7E`), longitud 1–128 caracteres, sin espacios ni controles, case-sensitive.
 - No forma parte de `request_hash`.
-- Ausente o invalido: categoria `VALIDATION`, HTTP `422`; Transport no congela un `error.code` especifico. No se inventa uno en este borrador; ver pendientes antes de freeze.
+- Ausente o invalido: `REQUEST_VALIDATION_FAILED`, categoria `VALIDATION`, HTTP `422`, `retryable=false`, conforme al catalogo aditivo compartido.
+- No iniciar la ejecucion del command ni crear una fila idempotente usando una key invalida.
 
 #### `X-Request-Id`
 
@@ -96,6 +100,55 @@ Contexto derivado/autenticado:
 El contrato trata `payment_methods.code` como identificador externo contractual dentro del business derivado. Mientras se publique como referencia API, no debe reutilizarse para un metodo con semantica diferente. Cambiar `name` no cambia `code`; cambiar `code` es cambio contractual, no edicion visual.
 
 Estas referencias no autorizan acceso. Persisten las validaciones de tenant, branch, estado y command.
+
+### 4.2 Resolucion scoped y referencias no resolubles
+
+Resolver referencias publicas exclusivamente dentro del scope visible determinado por contexto confiable. La referencia del caller no amplia tenant/business/branch ni permite derivar el scope desde un recurso encontrado globalmente.
+
+Una referencia inexistente y una referencia fuera del scope visible producen la misma respuesta publica de no-resolucion. No hacer lookup global posterior para distinguirlas. No revelar el recurso oculto ni su tenant/business/branch mediante `message`, `details`, status u otro side channel contractual.
+
+| Input publico | Condicion | `error.code` | `category` | HTTP | `retryable` |
+|---|---|---|---|---:|---|
+| `branch_public_id` | No resoluble dentro del scope visible | `REFERENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | 404 | false |
+| `cash_session_public_id` | No resoluble dentro del scope visible | `REFERENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | 404 | false |
+| `customer_public_id` | No resoluble dentro del scope visible | `REFERENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | 404 | false |
+| `price_list_public_id` | No resoluble dentro del scope visible | `REFERENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | 404 | false |
+| `product_public_id` | No resoluble dentro del scope visible | `REFERENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | 404 | false |
+| `payment_method_code` | No resoluble dentro del business/scope visible derivado | `REFERENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | 404 | false |
+| `quotation_public_id` | No resoluble dentro de su scope visible | `QUOTATION_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | 404 | false |
+| `unit_code + unit_context`, junto con el producto | Presentacion no valida/utilizable para el producto | `PRODUCT_UNIT_INVALID` | `VALIDATION` | 422 | false |
+
+Para quotation, `QUOTATION_NOT_FOUND` significa cotizacion no encontrada dentro del scope visible: cubre indistinguiblemente inexistencia y no-visibilidad, sin afirmar inexistencia global. Una cotizacion visible de branch incompatible conserva `QUOTATION_BRANCH_MISMATCH`.
+
+No usar `REFERENCE_NOT_FOUND` para una presentacion invalida ni reemplazar `PRICE_NOT_FOUND`, `DOCUMENT_SEQUENCE_NOT_FOUND` u otro codigo frozen/especifico adecuado. `CASH_SESSION_REQUIRED` expresa que falta la referencia obligatoria; una referencia proporcionada con formato valido pero no resoluble sigue el mapping de esta tabla.
+
+### 4.3 Semantica publica de `PRODUCT_UNIT_INVALID`
+
+`PRODUCT_UNIT_INVALID` significa que la presentacion seleccionada no es valida/utilizable para `CONFIRM_SALE`. Incluye contractualmente:
+
+- combinacion inexistente;
+- unit que no corresponde al producto;
+- context incompatible;
+- asociacion `product_unit` inactiva.
+
+No revelar cual de estas causas internas ocurrio. El codigo mantiene siempre `VALIDATION`, HTTP `422` y `retryable=false`; no bifurcar category/HTTP segun la causa interna.
+
+### 4.4 Mismatch visibility policy
+
+Los codigos mismatch frozen solo se emiten cuando el recurso ya es visible/resoluble dentro del scope permitido. Si la referencia no resuelve dentro de ese scope, no hacer lookup global para comprobar si existe en otro tenant/business/branch: usar `REFERENCE_NOT_FOUND/404` cuando no exista codigo especifico seguro; para quotation, `QUOTATION_NOT_FOUND/404`.
+
+| Codigo frozen | Condicion publica para emitirlo | `category` | HTTP |
+|---|---|---|---:|
+| `TERMINAL_BRANCH_MISMATCH` | Terminal del contexto autenticado y branch visible con relacion incompatible | `STATE_CONFLICT` | 409 |
+| `CASH_SESSION_TERMINAL_MISMATCH` | Sesion visible/resoluble que no corresponde a la terminal requerida | `STATE_CONFLICT` | 409 |
+| `CUSTOMER_BUSINESS_MISMATCH` | Cliente visible/resoluble con business incompatible para el command | `STATE_CONFLICT` | 409 |
+| `PRICE_LIST_BUSINESS_MISMATCH` | Lista visible/resoluble con business incompatible para el command | `STATE_CONFLICT` | 409 |
+| `PRODUCT_BUSINESS_MISMATCH` | Producto visible/resoluble con business incompatible para el command | `STATE_CONFLICT` | 409 |
+| `QUOTATION_BRANCH_MISMATCH` | Cotizacion visible/resoluble con branch incompatible para la venta | `STATE_CONFLICT` | 409 |
+
+La terminal proviene del contexto autenticado, no de un selector libre del body. Una branch publica no resoluble no se convierte en `TERMINAL_BRANCH_MISMATCH`. Con scope estricto de un solo business, algunos `*_BUSINESS_MISMATCH` pueden no ser alcanzables por selectores publicos ordinarios; se conservan los codigos frozen y no se amplia visibilidad para hacerlos alcanzables.
+
+La resolucion scoped se aplica en el punto correspondiente de la secuencia frozen; no introduce `authorization-before-reconciliation` ni una validacion anticipada de todos los recursos antes de replay/reconciliacion. Visibilidad no equivale a permiso para ejecutar el command: se preservan las validaciones y el orden de las secciones 9 y 10.
 
 ## 5. Request DTO
 
@@ -350,6 +403,8 @@ La reconciliacion ocurre antes de las validaciones posteriores de branch, termin
 
 La resolucion de contexto/referencias necesaria para entrar en la secuencia no equivale a adelantar dichas validaciones. La politica publica adicional para una reconciliacion historica se limita a lo que permiten los contratos frozen; este borrador no impone una reautorizacion que los contradiga.
 
+Las referencias se resuelven conforme al scope visible de la seccion 4, en el punto que corresponda a la secuencia frozen. No adelantar validaciones de catalogos, caja o cotizacion para sustituir un replay/reconciliacion por un error actual de esos recursos.
+
 Una key distinta con el mismo `(branch, client_operation_id)` tambien devuelve la venta ya existente; no se infiere igualdad de payload desde `sales`, que no almacena `request_hash`.
 
 ## 10. Secuencia de contexto y autorizacion
@@ -406,65 +461,80 @@ Este DTO es igual en confirmacion nueva, replay `COMPLETED` y reconciliacion por
 
 ## 12. Errores
 
-La response de error sigue el envelope Transport. `code` conserva exactamente el codigo frozen; `category` usa las categorias existentes; `HTTP` se deriva de Transport solo cuando la categoria esta suficientemente cerrada.
+La response de error sigue el envelope Transport. Los codigos frozen conservan su nombre y significado; los cuatro fallbacks compartidos provienen de `public-error-codes-v0.1.md`. La prioridad es: codigo frozen/domain-specific aplicable, codigo publico especifico del Command API y, por ultimo, fallback shared. Nunca reemplazar un codigo especifico correcto por uno generico.
 
-`FAILED persistido` indica el tratamiento de errores deterministas que ocurren en FASE B: rollback completo y persistencia de la key `FAILED` mediante FASE C segun el contrato transaccional. Un fallo tecnico no se convierte automaticamente en `FAILED`.
+Las clasificaciones publicas command-specific se cierran en este contrato usando las categorias existentes de Error Model y el HTTP mapping de Transport; no se atribuye al contrato transaccional un mapping HTTP que no define.
+
+`retryable=true` significa que la misma intencion semantica, sin corregir datos de negocio, puede razonablemente volver a intentarse posteriormente por una condicion temporal/transitoria reconocida por el contrato. No determina por si mismo misma key, nueva key ni retry inmediato; la mecanica de key se documenta separadamente en la seccion 9.
+
+Solo `SALE_IDEMPOTENCY_IN_PROGRESS` usa `retryable=true`; todos los demas codigos publicos de este command, incluidos los shared, usan `false`. Una posible reposicion futura de stock, reactivacion de recursos o cambio de precio no convierte por si sola la invalidacion en una condicion transitoria reconocida para reintento. `CONFIRM_SALE` no tiene una business-retryable especial frozen; la necesidad de cambiar key no determina este boolean.
+
+`FAILED persistido` usa `CONDITIONAL` para errores de dominio deterministas solo si ocurren dentro de FASE B conforme al contrato frozen: rollback completo y persistencia de la key `FAILED` mediante FASE C. No afirmar ni crear persistencia `FAILED` fuera de FASE B. `NO` en los conflictos de idempotencia significa que el error no cambia arbitrariamente el estado historico de la key; `IN_PROGRESS` no es `FAILED`. Un fallo tecnico no se convierte automaticamente en `FAILED` de dominio.
 
 | `error.code` | `category` | Retryable | HTTP | FAILED persistido | Autoridad / observacion |
 |---|---|---|---:|---|---|
-| `SALE_IDEMPOTENCY_KEY_REUSED` | `IDEMPOTENCY` | PENDIENTE ANTES DE FREEZE | 409 | No cambia el estado historico de la key | Transaction §4; Error Model §§9,17; Transport §14 |
-| `SALE_IDEMPOTENCY_IN_PROGRESS` | `IDEMPOTENCY` | true: reintento posterior permitido por lease/lifecycle | 409 | No | Transaction §4; Error Model §18; Transport §14 |
-| `USER_INACTIVE` | `AUTHORIZATION` | PENDIENTE ANTES DE FREEZE | 403 | Si es error deterministico en FASE B | Error Model §§3,11; Transaction §§3,16 |
-| `USER_BRANCH_FORBIDDEN` | `AUTHORIZATION` | PENDIENTE ANTES DE FREEZE | 403 | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Error Model §§3,11; Transaction §4 |
-| `USER_PERMISSION_DENIED` | `AUTHORIZATION` | PENDIENTE ANTES DE FREEZE | 403 | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Error Model §§3,11; Transaction §4 |
-| `TERMINAL_INACTIVE` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§11,19 dejan categoria sin cerrar |
-| `TERMINAL_BRANCH_MISMATCH` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Auth & Context §17 y Error Model §11: mismatch estructural, no automaticamente AUTHORIZATION |
-| `BRANCH_INACTIVE` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§11,19 no fijan categoria exacta |
-| `CASH_SESSION_REQUIRED` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Auth & Context §9; Transaction §16; Error Model §12 no asigna categoria |
-| `CASH_SESSION_CLOSED` | `STATE_CONFLICT` | PENDIENTE ANTES DE FREEZE | 409 | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Error Model §§3,12; Transaction §4; Transport §14 |
-| `CASH_SESSION_TERMINAL_MISMATCH` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Auth & Context §9; Error Model §§11,12 |
-| `CUSTOMER_INACTIVE` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§12,19 |
-| `CUSTOMER_BUSINESS_MISMATCH` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Auth & Context §17; mismatch estructural, no automaticamente AUTHORIZATION |
-| `PRICE_LIST_INACTIVE` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§12,19 |
-| `PRICE_LIST_BUSINESS_MISMATCH` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Auth & Context §17; mismatch estructural |
-| `PRODUCT_INACTIVE` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Transaction §§4,16; Error Model §§12,19 |
-| `PRODUCT_BUSINESS_MISMATCH` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Auth & Context §17; mismatch estructural |
-| `PRODUCT_UNIT_INVALID` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§12,19 |
-| `PRICE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | PENDIENTE ANTES DE FREEZE | 404 | Error de dominio deterministico sujeto a FASE C | Error Model §§3,12; Transport §14 |
-| `PRICE_CHANGED` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Transaction §§3,4; Error Model §§9,12,19 no lo clasifica como PRECONDITION |
-| `INVALID_QUANTITY` | `VALIDATION` | PENDIENTE ANTES DE FREEZE | 422 | Error de dominio deterministico sujeto a FASE C | Error Model §§3,12; Transport §14 |
-| `INVALID_DISCOUNT` | `VALIDATION` | PENDIENTE ANTES DE FREEZE | 422 | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Error Model §§3,12; Transaction §4 |
-| `INVALID_TAX_CALCULATION` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§12,19 no fija categoria especifica |
-| `INSUFFICIENT_STOCK` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Transaction §§3,4; Error Model §§12,19 |
-| `PAYMENT_METHOD_INACTIVE` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§12,19 |
-| `PAYMENT_TOTAL_MISMATCH` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Si es error deterministico en FASE B; determinismo confirmado por Error Model §8 | Transaction §16; Error Model §§8,12 |
-| `MIXED_REPLENISHMENT_CHANNELS` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §§12,19 |
-| `DOCUMENT_SEQUENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | PENDIENTE ANTES DE FREEZE | 404 | Error de dominio deterministico sujeto a FASE C | Error Model §12; mapping de Transport §14 |
-| `DOCUMENT_SEQUENCE_INACTIVE` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model §12 no asigna categoria |
-| `QUOTATION_NOT_FOUND` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Transaction §16; Error Model no fija especificamente visibilidad de quotation |
-| `QUOTATION_BRANCH_MISMATCH` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Error de dominio deterministico sujeto a FASE C | Auth & Context §17; mismatch estructural, no automaticamente AUTHORIZATION |
-| `QUOTATION_EXPIRED` | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | PENDIENTE ANTES DE FREEZE | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Transaction §§3,4; Error Model §§12,19 no fija categoria especifica |
-| `QUOTATION_ALREADY_CONVERTED` | `STATE_CONFLICT` | PENDIENTE ANTES DE FREEZE | 409 | Si es error deterministico en FASE B; ejemplo frozen de FASE C | Transaction §§3,4; Error Model §§3,12; Transport §14 |
-| `QUOTATION_STATUS_INVALID` | `STATE_CONFLICT` | PENDIENTE ANTES DE FREEZE | 409 | Error de dominio deterministico sujeto a FASE C | Error Model §§3,12; Transport §14 |
+| `SALE_IDEMPOTENCY_KEY_REUSED` | `IDEMPOTENCY` | false | 409 | NO | Transaction §4; Error Model §§9,17; no cambia el estado historico de la key |
+| `SALE_IDEMPOTENCY_IN_PROGRESS` | `IDEMPOTENCY` | true | 409 | NO | Transaction §4; Error Model §18; condicion en curso con reintento posterior permitido |
+| `USER_INACTIVE` | `AUTHORIZATION` | false | 403 | CONDITIONAL | Error Model §§3,11; Transaction §§3,16; actor conocido inactivo |
+| `USER_BRANCH_FORBIDDEN` | `AUTHORIZATION` | false | 403 | CONDITIONAL | Transaction §§3,4; Error Model §§3,11; falta acceso por user_branches |
+| `USER_PERMISSION_DENIED` | `AUTHORIZATION` | false | 403 | CONDITIONAL | Transaction §§3,4; Error Model §§3,11; falta SALES_CONFIRM |
+| `TERMINAL_INACTIVE` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Error Model §3; estado persistido no operativo |
+| `TERMINAL_BRANCH_MISMATCH` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Auth & Context §17; mismatch visible conforme a §4.4 |
+| `BRANCH_INACTIVE` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Error Model §3; sucursal existente inactiva |
+| `CASH_SESSION_REQUIRED` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §§3,16; Auth & Context §9; falta referencia obligatoria |
+| `CASH_SESSION_CLOSED` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,4; Error Model §3; estado persistido CLOSED |
+| `CASH_SESSION_TERMINAL_MISMATCH` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Auth & Context §§9,17; mismatch visible conforme a §4.4 |
+| `CUSTOMER_INACTIVE` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Error Model §3; cliente existente inactivo |
+| `CUSTOMER_BUSINESS_MISMATCH` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Auth & Context §17; mismatch visible conforme a §4.4 |
+| `PRICE_LIST_INACTIVE` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Error Model §3; lista existente inactiva |
+| `PRICE_LIST_BUSINESS_MISMATCH` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Auth & Context §17; mismatch visible conforme a §4.4 |
+| `PRODUCT_INACTIVE` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,4; Error Model §3; producto existente inactivo |
+| `PRODUCT_BUSINESS_MISMATCH` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Auth & Context §17; mismatch visible conforme a §4.4 |
+| `PRODUCT_UNIT_INVALID` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §§3,16; Error Model §3; semantica publica unica de §4.3 |
+| `PRICE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | false | 404 | CONDITIONAL | Transaction §3; Error Model §§3,12; no hay precio activo resoluble para lista/producto/unidad |
+| `PRICE_CHANGED` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §§3,4; precio esperado distinto del vigente; no PRECONDITION/fingerprint frozen |
+| `INVALID_QUANTITY` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §3; Error Model §3; cantidad semanticamente invalida |
+| `INVALID_DISCOUNT` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §§3,4; Error Model §3; descuento fuera de regla |
+| `INVALID_TAX_CALCULATION` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §§3,16; invalidacion deterministica de dominio; un fallo tecnico usa INTERNAL_ERROR |
+| `INSUFFICIENT_STOCK` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,4,17; saldo autoritativo revalidado dentro de transaccion insuficiente |
+| `PAYMENT_METHOD_INACTIVE` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Error Model §3; metodo existente inactivo |
+| `PAYMENT_TOTAL_MISMATCH` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §§3,4,16; Error Model §8; pagos no igualan exactamente el total |
+| `MIXED_REPLENISHMENT_CHANNELS` | `VALIDATION` | false | 422 | CONDITIONAL | Transaction §§3,16; combinacion de pagos viola el canal unico MVP |
+| `DOCUMENT_SEQUENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | false | 404 | CONDITIONAL | Transaction §§11,16; Error Model §12; secuencia requerida no encontrada |
+| `DOCUMENT_SEQUENCE_INACTIVE` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§11,16; secuencia existente inactiva |
+| `QUOTATION_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | false | 404 | CONDITIONAL | Transaction §16; frontera publica de no-resolucion scoped de §4.2 |
+| `QUOTATION_BRANCH_MISMATCH` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; mismatch de cotizacion visible conforme a §4.4 |
+| `QUOTATION_EXPIRED` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,4,12; vigencia incompatible; reemision/revalidacion es otro flujo |
+| `QUOTATION_ALREADY_CONVERTED` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,4,17; Error Model §3; conversion previa incompatible |
+| `QUOTATION_STATUS_INVALID` | `STATE_CONFLICT` | false | 409 | CONDITIONAL | Transaction §§3,16; Error Model §3; estado persistido no convertible |
 
 `SALE_ALREADY_CONFIRMED` esta reservado en el contrato transaccional para otros flujos y **no** se emite al encontrar la venta durante replay/reconciliacion. `SALE_IDEMPOTENCY_FAILED` se menciona como categoria interna; una key `FAILED` reproduce el error original, no un codigo publico generico.
 
 ### 12.1 Errores de transporte y tecnicos
 
-- `Idempotency-Key` ausente/invalido: `VALIDATION`, HTTP `422`; no hay `error.code` frozen especifico. No inventar uno en este borrador.
-- Auth no autenticada: `AUTHENTICATION`, HTTP `401`; no hay codigo concreto frozen.
-- Fallo tecnico: `INTERNAL_TECHNICAL`, HTTP `500` por defecto. No exponer SQL, stack, exceptions raw, locks, PK internas ni detalles de infraestructura; no persistir automaticamente como `FAILED`.
+Se adoptan explicitamente los cuatro codigos de `public-error-codes-v0.1.md`:
+
+| `error.code` | `category` | `retryable` | HTTP | FAILED persistido | Aplicacion |
+|---|---|---|---:|---|---|
+| `REQUEST_VALIDATION_FAILED` | `VALIDATION` | false | 422 | NO | Request/header semanticamente invalido sin codigo especifico; incluye Idempotency-Key ausente/invalido |
+| `AUTHENTICATION_REQUIRED` | `AUTHENTICATION` | false | 401 | NO | No existe identidad/sesion autenticada utilizable; no sustituye USER_INACTIVE |
+| `REFERENCE_NOT_FOUND` | `NOT_FOUND_VISIBILITY` | false | 404 | CONDITIONAL | Referencia con formato valido no resoluble dentro del scope visible, segun §4.2 |
+| `INTERNAL_ERROR` | `INTERNAL_TECHNICAL` | false | 500 por defecto | NO | Fallo tecnico interno generico si la capa HTTP puede construir una respuesta segura |
+
+`REQUEST_VALIDATION_FAILED` representa validacion generica de la frontera request/header y tiene `FAILED persistido = NO`: no pasa por FASE C ni se persiste como `FAILED`. `REFERENCE_NOT_FOUND` conserva `CONDITIONAL` unicamente cuando la no-resolucion deterministica ocurre dentro de FASE B conforme al contrato frozen; no autoriza persistencia fuera de esa fase. `Idempotency-Key` ausente/invalido siempre se rechaza antes de iniciar la ejecucion del command y sin crear una fila idempotente usando la key invalida.
+
+- No usar `REQUEST_VALIDATION_FAILED` cuando exista un codigo especifico adecuado, como `INVALID_QUANTITY`, `INVALID_DISCOUNT` o `PAYMENT_TOTAL_MISMATCH`.
+- `INTERNAL_ERROR` no expone SQL, stack, exception raw, constraints, locks, PK/FK internas, secretos ni infraestructura. No crear codigos separados para deadlock, timeout, SQL error, lock contention o crash especifico, ni persistir automaticamente el fallo como `FAILED` de dominio.
+- `INTERNAL_ERROR.retryable=false` no promete que se reconocio una condicion transitoria y no altera la recuperacion idempotente frozen.
 - `X-Request-Id` ausente/invalido se sustituye por uno generado y no es error del command.
 
 ## 13. Pendientes antes de freeze
 
-1. Cerrar `category`, HTTP cuando no derivable y `retryable` publico de los errores marcados en la tabla. En especial:
-   - `PRICE_CHANGED` no es `PRECONDITION`: CONFIRM_SALE no tiene fingerprint/precondition frozen; su categoria y HTTP quedan pendientes.
-   - La tabla de categorias de Error Model §3 da como ejemplos claros de `AUTHORIZATION` `USER_INACTIVE`, `USER_BRANCH_FORBIDDEN` y `USER_PERMISSION_DENIED`. Authorization & Context §17 establece que los mismatches estructurales no son automaticamente `AUTHORIZATION`. Error Model §19 coloca `TERMINAL_INACTIVE`, `TERMINAL_BRANCH_MISMATCH` y `BRANCH_INACTIVE`, junto con `CASH_SESSION_TERMINAL_MISMATCH`, `CUSTOMER_BUSINESS_MISMATCH`, `PRICE_LIST_BUSINESS_MISMATCH`, `PRODUCT_BUSINESS_MISMATCH` y `QUOTATION_BRANCH_MISMATCH`, en la columna general `validation/context/state errors`, no en `authorization errors`. Esa agrupacion amplia no fija la categoria individual exacta. Por ello, category/HTTP permanecen `PENDIENTE ANTES DE FREEZE`; no se escoge una categoria por inferencia.
-   - Para los demas codigos con retryability pendiente, el contrato transaccional no fija un boolean publico. No inferir `false` solo por ser deterministico.
-2. Definir errores/codigos publicos para referencias con formato valido pero no resolubles cuando el catalogo frozen no contiene un codigo especifico (por ejemplo branch, customer, price list, product o payment method no encontrados). No inventar ni sustituir silenciosamente codigos en este borrador.
-3. Definir `error.code` para errores genericos de request validation, ausencia/formato invalido de `Idempotency-Key`, autenticacion y fallo tecnico solo si se requiere un codigo concreto; las autoridades actuales no lo fijan.
-4. Cerrar la politica publica adicional de exposicion/auth en reconciliacion solo donde las autoridades frozen dejan margen. No puede cambiar el orden frozen ni introducir authorization-before-reconciliation.
+Category/HTTP, retryable publico, semantica unica de `PRODUCT_UNIT_INVALID`, codigos genericos, referencias no resolubles y mismatch visibility policy quedan cerrados en este borrador mediante las secciones 4 y 12 y la adopcion del catalogo aditivo compartido.
+
+Permanece pendiente cerrar la politica publica adicional de exposicion/auth en reconciliacion historica, unicamente en los aspectos no cubiertos por la resolucion scoped y donde las autoridades frozen dejan margen. La politica de referencias/mismatches no equivale a cerrar toda esa politica adicional. No puede cambiar el orden frozen, introducir `authorization-before-reconciliation` ni agregar reautorizacion/revalidacion transversal de una key terminal.
+
+El documento sigue `BORRADOR CONTROLADO`; este cierre del error contract no lo declara FROZEN.
 
 Algoritmo criptografico, libreria de canonicalizacion, backend, framework, middleware, auth provider, SQL, logging, deployment y OpenAPI siguen diferidos a implementacion/otros hitos y no son pendientes de freeze de este contrato.
 
