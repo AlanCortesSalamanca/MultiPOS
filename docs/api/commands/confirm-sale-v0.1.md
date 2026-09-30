@@ -1,10 +1,10 @@
 # CONFIRM_SALE Command API v0.1
 
-- Estado: BORRADOR CONTROLADO
+- Estado: FROZEN
 - Version: v0.1
 - Implementacion: no iniciada
 
-Este documento **todavia NO esta FROZEN**. Define la frontera HTTP publica del command `CONFIRM_SALE`; el cierre de sus decisiones documentales no equivale a declarar el documento congelado.
+`CONFIRM_SALE Command API v0.1` **queda FROZEN**. Define la frontera HTTP publica estable de `CONFIRM_SALE`; las decisiones publicas de esta version quedan congeladas. Un cambio semantico incompatible requiere evolucion/versionado documental y la implementacion posterior debe respetar este contrato.
 
 ## 1. Objetivo y autoridad
 
@@ -180,7 +180,7 @@ La resolucion scoped se aplica en el punto correspondiente de la secuencia froze
 
 ## 5. Request DTO
 
-Los siguientes JSON son formas conceptuales normativas para este borrador. Todos los importes y cantidades decimales son strings canonicos segun Transport; no JSON numbers.
+Los siguientes JSON son formas conceptuales normativas de este contrato v0.1. Todos los importes y cantidades decimales son strings canonicos segun Transport; no JSON numbers.
 
 ### 5.1 DIRECT SALE
 
@@ -660,15 +660,15 @@ Solo cuando no existe sale historica continuan las validaciones actuales en su o
 
 Esta agrupacion no altera el orden de locks/validaciones frozen. No ejecutar estas validaciones actuales unicamente para decidir si debe devolverse una venta historica. La no-resolucion actual de referencias distintas de branch tambien pertenece a la ruta de ejecucion nueva, sin cambiar su mapping ni la semantica FAILED de las tablas anteriores.
 
-## 13. Pendientes antes de freeze
+## 13. Estado de cierre y diferidos
 
-Category/HTTP, retryable publico, semantica unica de `PRODUCT_UNIT_INVALID`, codigos genericos, referencias no resolubles y mismatch visibility policy quedan cerrados en este borrador mediante las secciones 4 y 12 y la adopcion del catalogo aditivo compartido.
+Category/HTTP, retryable publico, semantica unica de `PRODUCT_UNIT_INVALID`, codigos genericos, referencias no resolubles y mismatch visibility policy quedan cerrados en este contrato v0.1 mediante las secciones 4 y 12 y la adopcion del catalogo aditivo compartido.
 
-El pendiente de politica publica adicional de exposicion/auth en reconciliacion historica queda cerrado por la decision publica command-specific v0.1 adoptada en las secciones 1.1, 3.2, 4, 9, 10, 11 y 12. No quedan decisiones documentales pendientes de este bloque antes de freeze: la frontera minima no cambia el orden frozen, no introduce `authorization-before-reconciliation` y no agrega reautorizacion/revalidacion del command para una key terminal.
+La politica publica adicional de exposicion/auth en reconciliacion historica queda cerrada por la decision publica command-specific v0.1 adoptada en las secciones 1.1, 3.2, 4, 9, 10, 11 y 12. No quedan decisiones documentales pendientes de este bloque en v0.1: la frontera minima no cambia el orden frozen, no introduce `authorization-before-reconciliation` y no agrega reautorizacion/revalidacion del command para una key terminal.
 
-El documento sigue `BORRADOR CONTROLADO`; este cierre documental no lo declara FROZEN.
+Este documento queda `FROZEN` en v0.1.
 
-Provider concreto, mecanismo/header de autenticacion, implementacion de contexto, algoritmo/libreria de hash y canonicalizacion, implementacion de locks, backend, framework, middleware, SQL, logging, deployment, OpenAPI y los demas elementos ya fuera de alcance siguen diferidos a implementacion/otros hitos. No son blockers ni pendientes de freeze de este contrato.
+Provider concreto, mecanismo/header de autenticacion, implementacion de contexto, algoritmo/libreria de hash y canonicalizacion, implementacion de locks, backend, framework, middleware, SQL, logging, deployment, OpenAPI y los demas elementos ya fuera de alcance siguen diferidos a implementacion/otros hitos. Son puntos de implementacion no bloqueantes y no alteran el contrato FROZEN v0.1.
 
 ## 14. Fuera de alcance
 
