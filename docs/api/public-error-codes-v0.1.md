@@ -1,10 +1,12 @@
 # API Public Error Codes v0.1
 
-- Estado: BORRADOR CONTROLADO
+- Estado: FROZEN
 - Version: v0.1
 - Implementacion: no iniciada
 
-Este documento **todavia NO esta FROZEN**. Es un catalogo compartido **ADITIVO** de codigos publicos; su primera adopcion es el Command API de `CONFIRM_SALE`.
+Este documento **queda FROZEN en v0.1**. Define el catalogo compartido **ADITIVO** de codigos publicos adoptado inicialmente por `CONFIRM_SALE`.
+
+Las cuatro semanticas publicas quedan estabilizadas en v0.1. Un cambio semantico incompatible requiere evolucion/versionado documental; una implementacion posterior no puede reinterpretar silenciosamente estos codigos.
 
 ## 1. Objetivo y alcance
 
