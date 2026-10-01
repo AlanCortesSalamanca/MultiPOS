@@ -26,9 +26,34 @@ app.Use(async (context, next) =>
         : Guid.NewGuid().ToString("D");
 
     context.TraceIdentifier = requestId;
-    context.Response.Headers[RequestIdHeaderName] = requestId;
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers[RequestIdHeaderName] = requestId;
+        return Task.CompletedTask;
+    });
 
     await next(context);
+});
+
+app.UseExceptionHandler(exceptionHandlerApp =>
+{
+    exceptionHandlerApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+        await context.Response.WriteAsJsonAsync(
+            new
+            {
+                error = new
+                {
+                    code = "INTERNAL_ERROR",
+                    message = "An internal error occurred.",
+                    category = "INTERNAL_TECHNICAL",
+                    retryable = false
+                }
+            },
+            context.RequestAborted);
+    });
 });
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
