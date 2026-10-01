@@ -2,14 +2,14 @@
 
 | Control | Valor |
 | --- | --- |
-| Estado del documento | **BORRADOR CONTROLADO — NO FROZEN** |
+| Estado del documento | **BASELINE DE IMPLEMENTACIÓN PARCIALMENTE FROZEN — DESKTOP PENDING** |
 | Versión | v0.1 |
 | Fecha de revisión | 2026-09-30 |
 | Alcance | Un comercio, inicialmente cuatro sucursales, backend y datos centrales, Web Logística y POS Desktop separados |
-| Base de inspección | Branch `main`, HEAD `1342c97` (`docs(api): freeze confirm sale v0.1`), árbol de trabajo inicialmente limpio |
-| Implementación | No iniciada por este micro-hito |
+| Base de ratificación | Branch `main`, HEAD `9bc2e4e` (`docs(architecture): add POS hardware inventory draft v0.1`), árbol de trabajo inicialmente limpio |
+| Implementación | Habilitada para backend/Web; no iniciada por este micro-hito; desktop pendiente |
 
-Este documento es el registro controlado de arquitectura tecnológica y selección de stack. Consolida decisiones existentes, propone las tecnologías todavía no elegidas y identifica los pendientes reales. **No congela las propuestas por el hecho de documentarlas.** Tampoco sustituye reglas funcionales, contratos transaccionales, contratos API ni el modelo físico vigente.
+Este documento es el registro controlado de arquitectura tecnológica y selección de stack. Consolida decisiones existentes, ratifica una baseline implementable para backend/Web/infraestructura e identifica los pendientes reales. Las decisiones marcadas **FROZEN EN TECH-STACK v0.1** quedan congeladas por este hito para iniciar implementación; el stack completo no está cerrado porque `POS_DESKTOP_FRAMEWORK = PENDING`. Ese pendiente independiente no invalida los bloques ya ratificados ni impide comenzar backend/Web. Este documento tampoco sustituye reglas funcionales, contratos transaccionales, contratos API ni el modelo físico vigente.
 
 ## 1. Autoridades y trazabilidad
 
@@ -38,14 +38,14 @@ Las referencias siguientes fueron inspeccionadas antes de redactar. Sus estados 
 ### 1.1 Límites de autoridad
 
 - A1 gobierna el alcance funcional; A2/A3 gobiernan la estructura física vigente; T1–T4 gobiernan la semántica transaccional concreta; P5–P7 gobiernan los aspectos públicos congelados de su alcance.
-- Una propuesta tecnológica debe satisfacer esas autoridades. Elegir un framework no permite cambiar locks, redondeo, idempotencia, permisos, folios, snapshots ni errores congelados.
+- Una decisión tecnológica debe satisfacer esas autoridades. Elegir un framework no permite cambiar locks, redondeo, idempotencia, permisos, folios, snapshots ni errores congelados.
 - Los documentos API base P1–P4 conservan su estado de borrador. Se usan conforme a su adopción y a las reglas específicas cerradas en P5–P7, sin declarar que toda la API está congelada.
 - Los antecedentes db-2/db-3 citados por T1–T3 no obligan a operar distintas bases: A3 declara compatibilidad acumulativa de db-4 para esos dominios y el delta de fulfillment para compras.
-- Si aparece una contradicción material no resuelta, debe registrarse y cerrarse documentalmente antes de implementar el punto afectado. Este borrador no tiene autoridad para corregir silenciosamente un contrato congelado.
+- Si aparece una contradicción material no resuelta, debe registrarse y cerrarse documentalmente antes de implementar el punto afectado. Esta baseline no tiene autoridad para corregir silenciosamente un contrato congelado.
 
-## 2. Evidencia del repositorio al iniciar
+## 2. Evidencia de origen y estado previo a implementación
 
-La inspección encontró documentación y SQL de diseño/validación, sin aplicación implementada:
+La inspección de origen del borrador encontró documentación y SQL de diseño/validación, sin aplicación implementada:
 
 ```text
 gengxin/
@@ -65,15 +65,15 @@ gengxin/
     transactions/
 ```
 
-No existía `docs/architecture/`, documento equivalente de stack, `src/`, Dockerfile, configuración adicional Docker, `pyproject.toml`, `requirements.txt`, `uv.lock`, `package.json`, lockfile de dependencias de aplicación, `.sln`, `.csproj` ni configuración de stack equivalente. El README contiene únicamente el nombre del proyecto. Los patrones `node_modules/` y `dist/` en `.gitignore` no prueban una elección previa de Node/React.
+Al redactar el borrador original no existía `docs/architecture/`, documento equivalente de stack, `src/`, Dockerfile, configuración adicional Docker, `pyproject.toml`, `requirements.txt`, `uv.lock`, `package.json`, lockfile de dependencias de aplicación, `.sln`, `.csproj` ni configuración de stack equivalente. Desde entonces se agregaron este documento y el inventario POS, pero continúa sin aplicación implementada. El README contiene únicamente el nombre del proyecto. Los patrones `node_modules/` y `dist/` en `.gitignore` no prueban una elección previa de Node/React.
 
 Compose contiene `postgres:17`, contenedor `gengxin-postgres`, volumen persistente, healthcheck y publicación `5432:5432`. `.env.example` contiene `POSTGRES_USER`, `POSTGRES_PASSWORD=change_me` y `POSTGRES_DB`. Existe `.env` local ignorado por Git; sus valores no son evidencia documental del stack. La configuración existente no constituye una topología productiva validada.
 
-El único archivo creado por este micro-hito es este documento. No se crean proyectos, código, tests, migrations, SQL, Dockerfiles ni CI/CD; tampoco se mueven archivos o se modifican autoridades existentes.
+El único archivo modificado por este micro-hito de ratificación es este documento. No se crean proyectos, código, tests, migrations, SQL, Dockerfiles ni CI/CD; tampoco se mueven archivos o se modifican autoridades existentes.
 
 ## 3. Dos aplicaciones cliente con un backend común
 
-La separación **Web Logística / Administración** y **POS Desktop de sucursal** materializa los canales de A1 §1.4. No habrá una única aplicación frontend encargada de todo. Ambas consumen la misma lógica central/API y la misma fuente de datos.
+La separación **Web Logística / Administración** y **POS Desktop de sucursal** materializa los canales de A1 §1.4. La existencia de ambos canales es **FROZEN EXISTENTE**; su separación tecnológica, la Web responsive y la frontera de hardware quedan **FROZEN EN TECH-STACK v0.1**. No habrá una única aplicación frontend encargada de todo. Ambas consumen la misma lógica central/API y la misma fuente de datos.
 
 ### 3.1 Web Logística / Administración
 
@@ -89,7 +89,7 @@ Responsabilidades conceptuales, sujetas a permisos y a contratos de cada operaci
 - Facturación/CFDI administrativa, consulta/entrega de XML/PDF y operaciones fiscales según el futuro contrato fiscal.
 - Usuarios, permisos y configuración administrativa.
 
-**Decisión arquitectónica explícita propuesta:** la Web no integra directamente impresoras térmicas, scanners como hardware POS, cajones de dinero, puertos COM, USB, drivers, hardware local de caja ni impresión POS directa. No se introduce un puente local de hardware para convertirla en caja POS. Un código capturado manualmente es input, no una integración POS del navegador. PDF/descarga o impresión documental convencional no equivalen a impresión directa de tickets.
+**Frontera de hardware FROZEN EN TECH-STACK v0.1:** la Web no integra directamente impresoras térmicas, scanners como hardware POS, cajones de dinero, puertos COM, USB, drivers, hardware local de caja ni impresión POS directa. No se introduce un puente local de hardware para convertirla en caja POS. Un código capturado manualmente es input, no una integración POS del navegador. PDF/descarga o impresión documental convencional no equivalen a impresión directa de tickets.
 
 T3 y T4 permiten operación administrativa sin terminal POS funcional: `audit_log.terminal_id` puede ser contextual o `NULL`. No se inventa una terminal para habilitar pedidos/compras desde la Web.
 
@@ -109,7 +109,7 @@ La UI y los adaptadores locales son responsabilidad desktop. Los efectos de nego
 
 ## 4. ONLINE-FIRST CENTRALIZADO
 
-**Estado: PROPUESTA PARA FREEZE.** Compatible con A1 §§1.2–1.4,21,22,27: base lógica central, servidor accesible por sucursales y modo offline fuera del alcance inicial. No se encontró un freeze documental independiente de esta decisión tecnológica completa.
+**Estado: FROZEN EN TECH-STACK v0.1.** Compatible con A1 §§1.2–1.4,21,22,27: base lógica central, servidor accesible por sucursales y modo offline fuera del alcance inicial. Este hito ratifica la decisión tecnológica completa sin convertirla en un freeze previo.
 
 ```text
 POS Desktop (cada PC de las cuatro sucursales) -- HTTPS --\
@@ -117,7 +117,7 @@ POS Desktop (cada PC de las cuatro sucursales) -- HTTPS --\
 Web Logística (navegador Desktop/Tablet/Mobile) -- HTTPS --/
 ```
 
-Consecuencias operativas propuestas:
+Consecuencias operativas de la baseline:
 
 - Una confirmación requiere conectividad con la API central; el cliente no puede declarar localmente un éxito autoritativo.
 - Ante pérdida de respuesta/COMMIT desconocido, conservar la identidad de la operación y recuperar/reintentar conforme al contrato idempotente. No generar una venta nueva solo por timeout ni interpretar pérdida de respuesta como rollback confirmado.
@@ -125,7 +125,7 @@ Consecuencias operativas propuestas:
 - No incorporar base operativa offline completa por sucursal, sincronización bidireccional, conflictos distribuidos, folios offline, stock offline autoritativo ni ventas offline sincronizadas posteriormente.
 - Puede evaluarse después cache/configuración local **no autoritativa**. Un cache, carrito o dato técnico de recuperación no es una venta confirmada ni una fuente de stock. Este hito no selecciona motor local, cola persistente ni mecanismo de sincronización.
 
-La dependencia de Internet/API es un efecto aceptable de la propuesta MVP, que debe ratificarse al congelarla. Latencia, conectividad y procedimiento ante caída se validarán con la sucursal piloto; no se presupone operación offline para compensarlos.
+La dependencia de Internet/API es un efecto aceptado por la baseline MVP. Latencia, conectividad y procedimiento ante caída se validarán con la sucursal piloto; no se presupone operación offline para compensarlos.
 
 ## 5. Backend como MODULAR MONOLITH
 
@@ -152,9 +152,9 @@ Los módulos colaboran dentro del proceso y de la transacción que corresponda. 
 
 Esta lista no congela nombres de assemblies, clases, capas, handlers ni carpetas internas. No se crean ahora.
 
-## 6. Backend candidato preferido: ASP.NET Core 10 + C# + .NET 10 LTS
+## 6. Backend: ASP.NET Core 10 + C# + .NET 10 LTS
 
-**Estado: PROPUESTA PARA FREEZE — CANDIDATO PREFERIDO.** No hay aplicación previa ni blocker documental real encontrado que obligue a otro backend.
+**Estado: FROZEN EN TECH-STACK v0.1.** Es el stack backend de la primera implementación; no hay blocker documental real que obligue a otro backend.
 
 Encaje específico para GENGXIN:
 
@@ -166,7 +166,7 @@ Encaje específico para GENGXIN:
 - Ecosistema C# compartible con ambos candidatos desktop para contratos públicos y cliente API, sin mover reglas críticas al cliente.
 - Testing unitario/integración compatible con PostgreSQL real y escenarios concurrentes.
 
-.NET 10 es LTS; la política oficial consultada incluye ASP.NET Core y fija fin de soporte el **2028-11-14**. La vida útil de GENGXIN excederá una release: deberá mantenerse parcheado y planear evolución a versiones soportadas. LTS no significa congelar indefinidamente un patch. SDK, patch e imágenes concretas se fijarán al materializar el stack, sin previews como base productiva.
+.NET 10 es la línea base de implementación inicial y es LTS; la política oficial consultada incluye ASP.NET Core y fija fin de soporte el **2028-11-14**. La vida útil de GENGXIN excederá una release: SDK/runtime deberán mantenerse actualizados dentro de versiones soportadas y deberá planearse la evolución correspondiente. LTS y este freeze no significan fijar indefinidamente un patch. SDK, patch e imágenes concretas se fijarán al materializar el stack, sin previews como base productiva.
 
 ### 6.1 Comparación acotada al núcleo GENGXIN
 
@@ -178,7 +178,7 @@ Encaje específico para GENGXIN:
 | Integración desktop | Cliente/contratos C# y tooling compartibles con WinUI/WPF. | OpenAPI sigue permitiendo cliente C#, sin compartir ecosistema backend. | OpenAPI sigue permitiendo cliente C#, sin compartir ecosistema backend. |
 | Testing y vida útil | xUnit/integración; ciclo LTS explícito y ruta de actualización .NET. | pytest/integración son viables; mantener framework, Python y dependencias soportados. | Ecosistema de tests viable; mantener Node/framework/dependencias soportados. |
 
-Los tres pueden implementar la semántica congelada; no se declara superioridad transaccional automática de un framework. Se prefiere ASP.NET Core por control tipado del núcleo y coherencia con el POS C#, además de su ciclo de mantenimiento. El repositorio no acredita experiencia real del equipo en ninguno: asignar capacidad de mantenimiento es trabajo de planificación, no evidencia inventada de un blocker técnico.
+Los tres pueden implementar la semántica congelada; no se declara superioridad transaccional automática de un framework. Se ratifica ASP.NET Core por control tipado del núcleo y coherencia con el POS C#, además de su ciclo de mantenimiento. El repositorio no acredita experiencia real del equipo en ninguno: asignar capacidad de mantenimiento es trabajo de planificación, no evidencia inventada de un blocker técnico.
 
 ## 7. PostgreSQL como motor y PostgreSQL 17 como runtime del MVP
 
@@ -190,9 +190,9 @@ Los tres pueden implementar la semántica congelada; no se declara superioridad 
 
 Este freeze no fija una major runtime para siempre. No se modifica db-4 ni se crea db-5.
 
-### 7.2 PROPUESTA PARA FREEZE DEL STACK: major runtime
+### 7.2 FROZEN EN TECH-STACK v0.1: major runtime
 
-**PostgreSQL 17 como major runtime del MVP.** Se mantiene esta propuesta porque db-4 fue validado realmente sobre PostgreSQL **17.11**, I1 utiliza `postgres:17`, no existe una necesidad funcional o técnica actual de saltar a PostgreSQL 18 y hacerlo introduciría una migración de major antes de iniciar la implementación.
+**PostgreSQL 17 como major runtime del MVP.** Se ratifica esta línea porque db-4 fue validado realmente sobre PostgreSQL **17.11**, I1 utiliza `postgres:17`, no existe una necesidad funcional o técnica actual de saltar a PostgreSQL 18 y hacerlo introduciría una migración de major antes de iniciar la implementación.
 
 PostgreSQL 17.11 es evidencia de validación, no un patch congelado para siempre. Los upgrades compatibles dentro de la línea 17 deben mantenerse y validarse. Una futura evolución de major PostgreSQL no crea automáticamente db-5, y cambiar la major runtime no autoriza modificar silenciosamente el modelo físico congelado.
 
@@ -200,7 +200,7 @@ La base lógica central contiene existencias por sucursal y reposición por `bra
 
 ## 8. Acceso a datos: Npgsql y SQL transaccional explícito
 
-**Npgsql: PROPUESTA PARA FREEZE** como driver .NET → PostgreSQL. Para `CONFIRM_SALE`, `CONFIRM_RETURN`, `CONFIRM_ORDER` y `CONFIRM_PURCHASE`, priorizar SQL parametrizado y control visible de conexión, transacción y secuencia de operaciones.
+**Npgsql + SQL PostgreSQL explícito: FROZEN EN TECH-STACK v0.1** para el núcleo transaccional. Para `CONFIRM_SALE`, `CONFIRM_RETURN`, `CONFIRM_ORDER` y `CONFIRM_PURCHASE`, usar SQL parametrizado y control visible de conexión, transacción y secuencia de operaciones.
 
 El diseño futuro debe mostrar claramente:
 
@@ -222,9 +222,9 @@ Esta tabla es orientación de implementación, no copia exhaustiva ni sustituto 
 
 **EF Core NO ES REQUISITO PARA EL NÚCLEO TRANSACCIONAL.** Puede evaluarse después para CRUD/queries administrativas; no será autoridad sobre transacciones críticas, locks ni evolución automática del schema congelado. Dapper puede evaluarse como ayuda de mapping. **EF Core/Dapper = PENDING**, sin selección definitiva ni dependencia obligatoria en este hito. Cualquier helper futuro debe respetar la transacción explícita y los mutexes del agregado incluso al editar un DRAFT administrativo.
 
-## 9. Web frontend candidato
+## 9. Web frontend
 
-**Estado: PROPUESTA PARA FREEZE.** SPA React para operación logística/administrativa autenticada; no existe necesidad concreta de SSR en el alcance actual.
+**Estado: FROZEN EN TECH-STACK v0.1.** SPA React para operación logística/administrativa autenticada; no existe necesidad concreta de SSR en el alcance actual.
 
 | Tecnología | Papel concreto |
 | --- | --- |
@@ -240,7 +240,7 @@ Desktop/laptop, tablet y celular son targets del mismo diseño Web Logistics: na
 
 Los tipos generados deben conservar los **strings decimales** de P5/P7. No convertir dinero/cantidades wire en `number` autoritativo. Una previsualización local no reemplaza pricing, impuestos, permisos ni confirmación del backend. TanStack Query no autoriza retries automáticos ni cola offline de commands críticos: sus mutations deben adoptar la política específica de key/precondiciones.
 
-No seleccionar Next.js sin una necesidad posterior documentada de SSR; no introducir Redux por defecto. Estado UI local y server state tienen responsabilidades distintas. Node.js será tooling de desarrollo/build, no runtime obligatorio del servidor Web productivo ni del POS. Vite 8 requiere Node compatible (mínimos publicados 20.19+/22.12+); seleccionar una línea Node **todavía soportada** y fijar package manager/lockfile es una decisión de implementación posterior.
+No seleccionar Next.js sin una necesidad posterior documentada de SSR; no introducir Redux por defecto. Estado UI local y server state tienen responsabilidades distintas. El freeze establece React 19, TypeScript, Vite 8, Tailwind CSS 4, shadcn/ui, TanStack Query v5 y React Router, no un patch eterno de cada paquete. Node.js será tooling de desarrollo/build, no runtime obligatorio del servidor Web productivo ni del POS. Vite 8 requiere Node compatible (mínimos publicados 20.19+/22.12+); seleccionar una línea Node **todavía soportada** y fijar package manager/lockfile es una decisión de implementación posterior.
 
 ## 10. POS Desktop: WinUI 3 vs WPF
 
@@ -250,7 +250,7 @@ POS_DESKTOP_FRAMEWORK = PENDING
 
 Candidatos primarios: **WinUI 3 + C# + .NET** y **WPF + C# + .NET moderno**. Evaluar .NET 10 donde la combinación SO/SDK/driver lo soporte; no se selecciona .NET Framework clásico por costumbre ni se congela aún runtime/Windows App SDK desktop concreto.
 
-El repo no contiene inventario de PCs, edición/build de Windows, impresora/scanner/cajón, driver, SDK de fabricante, arquitectura de DLLs ni mediciones/POC. La evidencia documental basta para acotar candidatos, **no para declarar ganador**.
+El repo contiene [el borrador controlado de inventario POS](pos-hardware-inventory-v0.1.md), pero sus datos reales de PCs, edición/build de Windows, impresora/scanner/cajón, drivers, SDKs y arquitecturas permanecen pendientes; tampoco existen mediciones/POC. La plantilla documental basta para organizar evidencia, **no para declarar ganador**.
 
 | Criterio de este POS | WinUI 3 | WPF |
 | --- | --- | --- |
@@ -306,7 +306,7 @@ Además, comprobar desconexión/reconexión, impresora no disponible, error visi
 
 ## 12. API común: REST + JSON + OpenAPI
 
-**REST + JSON y OpenAPI: PROPUESTA PARA FREEZE como dirección tecnológica.** El transporte HTTP/JSON de P5 y la frontera concreta P7 ya son **FROZEN EXISTENTE**; no se vuelven a diseñar aquí.
+**REST + JSON y OpenAPI: FROZEN EN TECH-STACK v0.1 como dirección tecnológica.** El transporte HTTP/JSON de P5 y la frontera concreta P7 ya son **FROZEN EXISTENTE**; no se vuelven a diseñar aquí.
 
 El backend es autoridad para permisos, pricing, descuentos, impuestos, stock, idempotencia, transacciones, folios, ledgers y reglas de dominio. Los clientes gestionan interacción/input/estado de presentación y envían commands; no duplican reglas críticas para tomar decisiones autoritativas locales.
 
@@ -335,15 +335,15 @@ API / Contracts C# (contratos públicos de transporte)
     -> Cliente API C# / POS Desktop C#
 ```
 
-**Estado: PROPUESTA PARA FREEZE** para esta dirección; **generación concreta = PENDING**. No elegir NSwag, OpenAPI Generator ni herramienta equivalente en este micro-hito.
+**Estado: FROZEN EN TECH-STACK v0.1** para la dirección OpenAPI → tipos/cliente TypeScript para Web y contratos/cliente C# para POS; **generación concreta = PENDING**. No elegir NSwag, OpenAPI Generator ni herramienta equivalente en este micro-hito.
 
 Compartir contrato público no significa compartir entidades de persistencia, credenciales, PK, SQL ni servicios de negocio internos. Web y POS consumen los mismos resultados públicos; no se da al POS acceso directo a repositorios .NET del servidor. El cliente C# puede ser generado o mantener contratos públicos compartidos: el mecanismo queda diferido. Decimales wire siguen como strings aunque el consumidor use `decimal` internamente con validación explícita.
 
 ## 14. Docker y reverse proxy
 
-**Docker Compose para servidor: PROPUESTA PARA FREEZE.** I1 acredita uso existente para PostgreSQL, no freeze de api/web/proxy. Docker es infraestructura central, **no runtime del POS**.
+**Docker Compose para servidor: FROZEN EN TECH-STACK v0.1.** I1 acredita uso existente para PostgreSQL; este hito ratifica la topología conceptual `postgres` + `api` + `web` + `reverse proxy`, todavía no materializada. Docker es infraestructura central, **no runtime del POS**.
 
-Topología candidata para un servidor/VPS:
+Topología conceptual de la baseline para un servidor/VPS:
 
 ```text
 Docker Compose (servidor central)
@@ -357,13 +357,13 @@ Windows en sucursales: POS instalado nativamente, fuera de Docker
 
 Los nombres anteriores son conceptuales; no se renombra `db`. El build Web es estático, no `vite dev` en producción. La decisión de servir sus assets en un servicio interno separado o directamente desde Caddy es un detalle no bloqueante; no añade un segundo backend.
 
-**Caddy: candidato principal, PROPUESTA PARA FREEZE** para HTTPS, certificados TLS/renovación, redirect HTTP → HTTPS y reverse proxy/routing. Su automatización reduce carga operativa de TLS en un único servidor. Requiere dominio/DNS, validación de certificados y almacenamiento persistente de su estado; no basta con elegir la imagen. No hay configuración o necesidad existente que justifique abrir una comparación amplia con nginx.
+**Caddy: FROZEN EN TECH-STACK v0.1** para HTTPS, certificados TLS/renovación, redirect HTTP → HTTPS y reverse proxy/routing Web/API. Su automatización reduce carga operativa de TLS en un único servidor. Requiere dominio/DNS, validación de certificados y almacenamiento persistente de su estado; no basta con elegir la imagen. No se implementa configuración en este hito.
 
 El proxy debe conservar `/api/v1` y sus headers; el fallback de routing SPA no debe absorber rutas API. La futura configuración de errores/proxy no debe sustituir los contratos API con respuestas incompatibles. En producción, PostgreSQL queda en red interna, sin puerto público a clientes; API/web internos se exponen por la entrada HTTPS. I1 publica 5432 al host: **observación para futura configuración de despliegue**, no una instrucción para modificar Compose aquí.
 
 ## 15. Deployment MVP
 
-**Estado: PROPUESTA PARA FREEZE.** Un servidor/VPS central con Docker Compose, API monolítica, PostgreSQL 17, Web estática y Caddy. No Kubernetes ni microservices distribuidos.
+**Estado: FROZEN EN TECH-STACK v0.1.** Un servidor/VPS central para el MVP, con Docker Compose, API monolítica, PostgreSQL 17 central, Web estática y Caddy. No Kubernetes ni microservices distribuidos.
 
 - Cuatro sucursales: `POS Desktop -> HTTPS -> API central`.
 - Acceso administrativo: `browser Desktop/Tablet/Mobile -> HTTPS -> infraestructura central`.
@@ -371,7 +371,7 @@ El proxy debe conservar `/api/v1` y sus headers; el fallback de routing SPA no d
 - Dev/test/prod separados al implementarse; volumen PostgreSQL persistente y configuración/secretos externos a imágenes/código.
 - Backups externos al servidor principal y restauración probada, healthchecks, logs estructurados y monitoreo básico conforme a A1 §§17,22,36. Un volumen Docker no es un backup.
 
-Un solo servidor no implica alta disponibilidad: la caída central afecta nuevas operaciones de todas las sucursales. La propuesta no promete SLA, RPO/RTO ni sizing inventados; esos parámetros, alertas y recuperación se cerrarán antes de producción. Hosting/VPS, región, dominio, SO de servidor e imágenes concretas quedan pendientes de implementación/operación.
+Un solo servidor no implica alta disponibilidad: la caída central afecta nuevas operaciones de todas las sucursales. La baseline no congela proveedor VPS, región, sizing, dominio, SLA, RPO/RTO, SO de servidor ni imágenes concretas; esos parámetros, alertas y recuperación se cerrarán antes de producción.
 
 CFDI se integra mediante adaptador del backend. PAC, correo, almacenamiento de XML/PDF y protección de CSD/secretos se seleccionarán en sus hitos; no se inventan proveedores aquí ni se hace depender venta/devolución operativa del éxito fiscal posterior.
 
@@ -389,26 +389,26 @@ Restricciones heredadas de A1/A3/T1–T4/P5–P7:
 
 Proveedor/mecanismo de identidad, cookies/bearer/OIDC/JWT, refresh y credencial de terminal siguen **PENDING**. ASP.NET no implica seleccionar ASP.NET Core Identity ni agregar su schema mediante migraciones automáticas: cualquier diseño deberá encajar con `users`, roles/permisos y terminales de db-4 y con la frontera P7.
 
-## 17. Estructura candidata del repositorio
+## 17. Estructura base del repositorio
 
-**Estado: PROPUESTA PARA FREEZE** de la separación de tres aplicaciones; nombres internos finales diferidos.
+**Estado: FROZEN EN TECH-STACK v0.1** para la separación de tres aplicaciones; nombres internos finales diferidos.
 
 ```text
 database/             schemas y validation existentes, preservados/versionados
 docs/                 autoridades funcionales, físicas, transaccionales, API y arquitectura
-src/                  futuro, después del freeze tecnológico
+src/                  futuro, al materializar esta baseline
   backend/            único backend desplegable, módulos internos
   pos-desktop/        UI Windows, cliente API y adaptadores de hardware
   web/                SPA logística/administrativa responsive
 ```
 
-La ubicación concreta de contratos públicos, tests, scripts de operación o infraestructura se decidirá al materializar proyectos. No se crean ahora `src/`, solución .NET, proyectos React/desktop ni carpetas de módulos; no se mueven SQL, documentos o Compose actuales. La estructura final deberá conservar estas fronteras después del freeze tecnológico.
+La ubicación concreta de contratos públicos, tests, scripts de operación o infraestructura se decidirá al materializar proyectos. No se crean ahora `src/`, solución .NET, proyectos React/desktop ni carpetas de módulos; no se mueven SQL, documentos o Compose actuales. La estructura final deberá conservar estas fronteras al implementar la baseline.
 
-## 18. Testing candidato y verificación del núcleo
+## 18. Testing base y verificación del núcleo
 
-**Herramientas: PROPUESTA PARA FREEZE.** No se implementan ni ejecutan nuevos tests en este hito documental.
+**Herramientas base: FROZEN EN TECH-STACK v0.1.** No se implementan ni ejecutan nuevos tests en este hito documental; el tooling UI/hardware desktop permanece `PENDING`.
 
-| Área | Propuesta |
+| Área | Baseline |
 | --- | --- |
 | Backend | xUnit para lógica; integration tests contra PostgreSQL 17 real, preferentemente instancia/contenedor aislado con db-4 |
 | Web | Vitest; React Testing Library cuando el comportamiento de componentes lo requiera; Playwright para E2E de operaciones administrativas |
@@ -429,40 +429,50 @@ Playwright cubre la Web; no se presupone que automatiza WinUI/WPF o prueba físi
 
 ## 19. Tabla controlada de decisiones
 
-Los únicos estados de decisión utilizados son **FROZEN EXISTENTE**, **PROPUESTA PARA FREEZE**, **PENDING** y **FUERA DE ALCANCE**. `FROZEN EXISTENTE` requiere evidencia indicada; no congela este documento completo.
+Los estados controlados son:
+
+| Estado | Definición |
+| --- | --- |
+| **FROZEN EXISTENTE** | Autoridad o decisión ya congelada fuera y antes de este documento; requiere la evidencia indicada. |
+| **FROZEN EN TECH-STACK v0.1** | Tecnología o decisión formalmente ratificada por este documento para implementación. No puede reinterpretarse silenciosamente. |
+| **PENDING** | Decisión todavía no seleccionada; no invalida freezes independientes ni debe tratarse como elegida. |
+| **FUERA DE ALCANCE** | Elemento que no forma parte del MVP o del micro-hito indicado. |
+
+El estado parcial del documento permite implementar los bloques ratificados sin afirmar que el stack desktop está cerrado.
 
 | Área | Tecnología / decisión | Estado | Motivo |
 | --- | --- | --- | --- |
 | Arquitectura lógica | MODULAR MONOLITH, un backend desplegable | FROZEN EXISTENTE | A1 §30 la declara congelada; evita dividir transacciones entre servicios |
 | Canales funcionales | Escritorio operacional y panel Web consumen lógica/API central | FROZEN EXISTENTE | A1 §§1.3–1.4 y freeze funcional §30 |
 | Database engine / physical model | PostgreSQL + db-4 | FROZEN EXISTENTE | PostgreSQL es el motor objetivo y el modelo físico db-4 está VALIDADO/CONGELADO; no se reabre el schema ni se crea db-5 |
-| Database runtime major | PostgreSQL 17 | PROPUESTA PARA FREEZE | db-4 fue validado sobre 17.11 e I1 usa `postgres:17`; no existe motivo actual para cambiar de major |
+| Database runtime major | PostgreSQL 17 | FROZEN EN TECH-STACK v0.1 | db-4 fue validado sobre 17.11 e I1 usa `postgres:17`; patch mantenible, sin motivo actual para cambiar de major |
 | Núcleo de dominio | T1–T4: atomicidad, locks, idempotencia, folios/ledgers | FROZEN EXISTENTE | Contratos transaccionales VALIDADO/CONGELADO, no redefinidos aquí |
 | Transporte/API existente | P5 Transport, P6 errores aditivos, P7 CONFIRM_SALE | FROZEN EXISTENTE | Freeze explícito y alcance público específico |
-| Operación central | ONLINE-FIRST CENTRALIZADO, sin confirmaciones offline MVP | PROPUESTA PARA FREEZE | Compatible con base central y offline fuera de alcance en A1; no freeze independiente previo |
-| Frontera hardware | Hardware/impresión POS solo en desktop; Web logística responsive | PROPUESTA PARA FREEZE | Precisa la separación A1 sin puentes locales en navegador |
-| Backend | ASP.NET Core 10 + C# + .NET 10 LTS | PROPUESTA PARA FREEZE | Candidato preferido por núcleo tipado, Npgsql y ecosistema desktop |
-| Driver/transacciones | Npgsql + SQL PostgreSQL explícito | PROPUESTA PARA FREEZE | Control visible de fases, locks y reconciliación según T1–T4 |
+| Operación central | ONLINE-FIRST CENTRALIZADO, sin confirmaciones offline MVP | FROZEN EN TECH-STACK v0.1 | Autoridad central; sin ventas/stock autoritativo offline ni sincronización distribuida MVP |
+| Frontera hardware | Hardware/impresión POS solo en desktop; Web logística responsive | FROZEN EN TECH-STACK v0.1 | Separa Web/POS sin puente local de scanner/impresora/cajón/COM/USB en navegador |
+| Backend | ASP.NET Core 10 + C# + .NET 10 LTS | FROZEN EN TECH-STACK v0.1 | Primera implementación tipada, API central, Npgsql y contenedor Linux viable |
+| Driver/transacciones | Npgsql + SQL PostgreSQL explícito | FROZEN EN TECH-STACK v0.1 | Control visible de fases, locks, idempotencia y reconciliación según T1–T4 |
 | ORM/helper administrativo | EF Core o Dapper opcionales | PENDING | No necesarios para núcleo; evaluar valor real en CRUD/mapping |
-| Web UI | React 19 + TypeScript | PROPUESTA PARA FREEZE | UI administrativa tipada con contratos públicos |
-| Web build/estilos | Vite 8 + Tailwind CSS 4 + shadcn/ui | PROPUESTA PARA FREEZE | SPA/build y responsive/componentes controlados |
-| Web state/routing | TanStack Query v5 + React Router | PROPUESTA PARA FREEZE | Server state y routing SPA sin reglas críticas locales |
-| Targets Web | Desktop/laptop, Tablet, Mobile por navegador | PROPUESTA PARA FREEZE | Una Web responsive; no implica POS móvil |
+| Web UI | React 19 + TypeScript | FROZEN EN TECH-STACK v0.1 | UI administrativa tipada con contratos públicos |
+| Web build/estilos | Vite 8 + Tailwind CSS 4 + shadcn/ui | FROZEN EN TECH-STACK v0.1 | SPA/build y responsive/componentes controlados |
+| Web state/routing | TanStack Query v5 + React Router | FROZEN EN TECH-STACK v0.1 | Server state y routing SPA sin reglas críticas locales |
+| Targets Web | Desktop/laptop, Tablet, Mobile por navegador | FROZEN EN TECH-STACK v0.1 | Una Web responsive; no implica POS móvil |
 | Desktop framework | WinUI 3 vs WPF; `POS_DESKTOP_FRAMEWORK = PENDING` | PENDING | Faltan SO/hardware real, POC y evidencia de distribución |
 | Desktop actualización | Mecanismo concreto de distribución/update | PENDING | Debe cerrar instalación/firma/permisos y recuperación después del framework |
-| API tecnológica | REST + JSON, OpenAPI conforme a autoridades | PROPUESTA PARA FREEZE | API común; automatización no redefine frontera congelada |
-| Contratos compartidos | OpenAPI → TS/Web; API/Contracts C# → POS | PROPUESTA PARA FREEZE | Evitar divergencia de DTOs sin compartir persistencia/reglas internas |
+| API tecnológica | REST + JSON, OpenAPI conforme a autoridades | FROZEN EN TECH-STACK v0.1 | API común; automatización no redefine frontera congelada |
+| Contratos compartidos | OpenAPI → TS/Web; API/Contracts C# → POS | FROZEN EN TECH-STACK v0.1 | Evitar divergencia de DTOs sin compartir persistencia/reglas internas |
 | Generación de clientes | Generador y estrategia concreta C#/TS | PENDING | No seleccionar NSwag/OpenAPI Generator en este hito |
-| Contenedores/deployment | Docker Compose central, POS nativo Windows | PROPUESTA PARA FREEZE | I1 solo acredita DB; topología completa propuesta para un VPS |
-| Reverse proxy | Caddy | PROPUESTA PARA FREEZE | HTTPS/TLS/redirect y routing con carga operativa acotada |
+| Contenedores | Docker Compose central, POS nativo Windows | FROZEN EN TECH-STACK v0.1 | Topología conceptual `postgres` + `api` + `web` + `reverse proxy`; no modifica I1 todavía |
+| Deployment base | Un servidor/VPS central + API/PostgreSQL/Web/Caddy | FROZEN EN TECH-STACK v0.1 | Baseline MVP central; proveedor, región, dominio, sizing y SLA quedan pendientes |
+| Reverse proxy | Caddy | FROZEN EN TECH-STACK v0.1 | HTTPS/TLS/renovación, redirect y routing Web/API |
 | Hosting | Proveedor/VPS/ubicación/dominio concretos | PENDING | Detalle operativo sin impedimento encontrado para Compose |
 | Autenticación | Proveedor/mecanismo/contexto/credencial de terminal | PENDING | Respetar db-4/P7 sin inventar proveedor ni policies incompatibles |
-| Tests backend/desktop | xUnit y PostgreSQL real para integración backend | PROPUESTA PARA FREEZE | Lógica comprobable y concurrencia real |
-| Tests Web | Vitest, RTL cuando aplique, Playwright | PROPUESTA PARA FREEZE | Componentes y flujos Web E2E |
+| Tests backend/desktop | xUnit; integración backend contra PostgreSQL 17 real/aislado | FROZEN EN TECH-STACK v0.1 | Lógica desacoplada y concurrencia PostgreSQL real |
+| Tests Web | Vitest, React Testing Library cuando aplique, Playwright | FROZEN EN TECH-STACK v0.1 | Componentes y flujos Web E2E |
 | Tests UI/hardware desktop | Tooling concreto | PENDING | Depende de framework/hardware; POC previo requerido |
-| Estructura de aplicaciones | `src/backend`, `src/pos-desktop`, `src/web` conceptual | PROPUESTA PARA FREEZE | Preserva repo documental y separa responsabilidades |
+| Estructura de aplicaciones | `src/backend`, `src/pos-desktop`, `src/web` conceptual | FROZEN EN TECH-STACK v0.1 | Preserva repo documental y separación Web/POS/backend; nombres internos finales diferidos |
 | Offline distribuido, móvil nativo, microservices/Kubernetes | No seleccionados para MVP | FUERA DE ALCANCE | A1 y ausencia de necesidad que compense complejidad |
-| Código/proyectos/configuración nuevos | Implementación y materialización del stack | FUERA DE ALCANCE | Este micro-hito crea solo documentación arquitectónica |
+| Código/proyectos/configuración nuevos en este hito | Implementación y materialización del stack | FUERA DE ALCANCE | Esta ratificación modifica solo documentación; el siguiente hito puede iniciar código backend |
 
 ## 20. Decisiones descartadas / no seleccionadas para el MVP
 
@@ -479,17 +489,17 @@ No se presentan como tecnologías malas; no corresponden a la dirección actual 
 
 ## 21. Consistencia con documentos existentes y observaciones
 
-No se encontró contradicción material de las propuestas backend/Web/online-first con una elección tecnológica congelada previa. Sí hay diferencias de alcance y metadatos históricos que deben conservarse visibles:
+No se encontró contradicción material entre las decisiones ahora ratificadas para backend/Web/online-first y una autoridad congelada previa. Sí hay diferencias de alcance y metadatos históricos que deben conservarse visibles:
 
-1. **Monolito modular ya congelado:** A1 §30 es más fuerte que una simple recomendación de §17.4. Por eso se registra FROZEN EXISTENTE, aunque stack/framework/despliegue continúen pendientes.
+1. **Monolito modular ya congelado:** A1 §30 es más fuerte que una simple recomendación de §17.4. Por eso se registra FROZEN EXISTENTE; la baseline tecnológica compatible se ratifica aquí y solo el framework desktop principal continúa pendiente.
 2. **Pendientes físicos históricos:** A1 §§26,33,37 habla de PostgreSQL por evaluar, 50 tablas y schema inicial pendiente. A3 documenta db-4 validado en PostgreSQL 17.11, con 52 tablas. No se reabre db-4 ni se regenera SQL por esas listas históricas.
 3. **Pendientes de compra en el documento físico:** A3 §§8,12 conserva como futuro integrar T4, inventory/costo/locks/READ COMMITTED. T4 actual §§1,43 ya los cierra y está congelado. Son desfases de seguimiento documental, no blockers del stack ni gaps reabiertos de compra.
 4. **API base vs hitos posteriores:** P1–P4 mencionan wire, HTTP, referencias y política pública de venta pendientes; P5–P7 ya cierran lo correspondiente a su alcance. Los cuatro borradores no se etiquetan FROZEN ni se universaliza la frontera de venta a devolución/pedido/compra.
 5. **JSON interno vs público:** D1 usa JSON numbers decimales y un ID interno de trazabilidad en snapshot persistido; P5 exige strings decimales y frontera pública sin PK. Son capas distintas, no autorización para convertir el snapshot interno a DTO. P7 no acepta `tax_snapshot` como input.
-6. **Infraestructura existente vs propuesta:** I1 solo tiene DB y puerto de host; api/web/Caddy, secretos productivos y red interna son diseño futuro. No se afirma deployment congelado ni contenedores ya implementados.
+6. **Infraestructura existente vs baseline:** I1 solo tiene DB y puerto de host. Docker Compose central, API/Web y Caddy quedan congelados como dirección tecnológica, pero sus servicios, secretos productivos y red interna aún no están materializados. Freeze de decisión no equivale a deployment implementado.
 7. **Selección desktop condicionada a hardware:** A1 §§11,22,26 la exige; mantener PENDING y POC respeta esa condición. No se atribuye soporte genérico Windows 10/11 sin validar edición/ciclo/driver.
 
-Sería útil un futuro hito documental explícito para actualizar referencias de seguimiento de A1/A3/P1–P4 donde proceda, respetando sus freezes. **No se modifica ningún otro archivo en este micro-hito.** Estas observaciones no permiten alterar silenciosamente semántica congelada.
+Una actualización futura de referencias de seguimiento de A1/A3/P1–P4 puede hacerse donde proceda, respetando sus freezes, pero no es requisito para iniciar backend/Web. **No se modifica ningún otro archivo en este micro-hito.** Estas observaciones no permiten alterar silenciosamente semántica congelada.
 
 ## 22. Evidencia técnica externa consultada
 
@@ -505,32 +515,33 @@ Consultada el **2026-09-30** para soporte/compatibilidad y capacidades, no como 
 - [Vite 8 release](https://vite.dev/blog/announcing-vite8): release estable y requisitos Node para build/dev.
 - [Caddy Automatic HTTPS](https://caddyserver.com/docs/automatic-https): certificados/renovación, redirect y requisitos de dominio/almacenamiento.
 
-## 23. Control de evolución y freeze futuro
+## 23. Control de evolución de la baseline parcialmente congelada
 
-Una vez que `tech-stack-v0.1.md` quede formalmente **FROZEN**, cualquier implementación nueva debe respetarlo y seguir respetando las autoridades de dominio/API/DB. Cambiar el estado exige un hito documental explícito; este borrador no inicia implementación ni anticipa esa aprobación.
+Toda implementación nueva debe respetar las decisiones **FROZEN EXISTENTE** y **FROZEN EN TECH-STACK v0.1**, además de las autoridades de dominio/API/DB. El estado **BASELINE DE IMPLEMENTACIÓN PARCIALMENTE FROZEN — DESKTOP PENDING** congela los bloques ratificados sin fingir que el framework desktop ya fue elegido.
 
-Si se necesita cambiar una decisión congelada, **NO editarla silenciosamente**:
+Una decisión marcada **FROZEN EN TECH-STACK v0.1** no puede reinterpretarse silenciosamente durante implementación. Cualquier cambio incompatible requiere:
 
 1. Documentar la razón y la decisión afectada.
 2. Evaluar impacto en contratos, clientes, hardware, despliegue, datos, testing y mantenimiento.
-3. Evolucionar/versionar el contrato tecnológico cuando el cambio sea incompatible, conservando trazabilidad de la decisión anterior.
+3. Registrar una decisión explícita y evolucionar/versionar el documento o contrato correspondiente, conservando trazabilidad de la decisión anterior.
 
-Versionado de stack, modelo físico/database, major runtime PostgreSQL, transacciones y API son ejes relacionados pero distintos; cambiar la major runtime no crea una db-5 ni autoriza modificar silenciosamente el modelo físico congelado, y cambiar tecnología no autoriza una nueva semántica de command sin su propia evolución. El freeze puede reconocer los PENDING no bloqueantes con su alcance y momento de cierre; no debe convertirlos ficticiamente en tecnologías seleccionadas.
+Este control no fija eternamente patches de SDKs, runtimes, imágenes o paquetes: deben mantenerse dentro de líneas compatibles y soportadas. Versionado de stack, modelo físico/database, major runtime PostgreSQL, transacciones y API son ejes relacionados pero distintos; cambiar la major runtime no crea una db-5 ni autoriza modificar silenciosamente el modelo físico congelado, y cambiar tecnología no autoriza una nueva semántica de command sin su propia evolución. Los `PENDING` conservan su alcance y momento de cierre sin invalidar decisiones congeladas independientes.
 
-## 24. Pendientes explícitos antes del freeze
+## 24. Pendientes y blockers después de esta baseline
 
-### 24.1 BLOCKERS PARA FREEZE DEL STACK completo
+### 24.1 BLOCKERS PARA CERRAR EL STACK COMPLETO
 
 | Pendiente | Por qué bloquea | Evidencia necesaria para cierre |
 | --- | --- | --- |
-| Inventario real Windows/hardware y combinaciones soportadas | Sin edición/build/ciclo/arquitectura y drivers no puede validarse una tecnología desktop para las cuatro sucursales | Matriz de configuraciones de §11, soporte de SO/.NET/App SDK/SDK fabricante y limitaciones identificadas |
-| POC de hardware y elección **WinUI 3 vs WPF** | La impresión/scanner/cajón/COM/USB y distribución son funciones esenciales POS aún no demostradas | POC comparativo §11, resultados por configuración y decisión documentada; hasta entonces `POS_DESKTOP_FRAMEWORK = PENDING` |
+| Completar inventario real Windows/hardware y configuraciones únicas | El borrador [pos-hardware-inventory-v0.1.md](pos-hardware-inventory-v0.1.md) existe, pero aún requiere datos reales de las cuatro sucursales | Edición/build/ciclo/arquitectura, PCs, periféricos, drivers/SDK, permisos y combinaciones reales identificadas |
+| Ejecutar POC comparativo WinUI 3 vs WPF | Impresión/scanner/cajón/COM/USB y distribución son funciones esenciales POS aún no demostradas | Matriz PASS/FAIL/N/A justificado por candidato y configuración conforme a §11 |
+| Seleccionar y documentar framework Desktop | El stack completo no puede cerrarse con dos candidatos principales sin decisión | Hito documental basado en inventario/POC que cambie `POS_DESKTOP_FRAMEWORK = PENDING` por la selección aprobada |
 
-No se encontró blocker técnico/documental que obligue a descartar ASP.NET Core 10/C# o el stack Web propuesto. No es necesario un benchmark genérico de frameworks, un ORM elegido o todos los proveedores contratados para congelar esas líneas. Las decisiones independientes pueden ratificarse por alcance, pero no se declara cerrado el **stack completo** mientras el framework POS permanezca sin elegir.
+### 24.2 BLOCKERS PARA COMENZAR BACKEND/WEB
 
-La ratificación de las propuestas de §19 y el cambio explícito de estado son el procedimiento documental del freeze (§23), no un blocker técnico adicional. Backend, Web, online-first, Npgsql, Caddy y Compose permanecen como propuestas hasta ese hito.
+**NINGUNO.** La baseline congelada en este documento autoriza iniciar backend y Web sin esperar el inventario, el POC o la selección del framework Desktop. Los pendientes de implementación posteriores no reabren decisiones ratificadas ni son blockers artificiales para el bootstrap.
 
-### 24.2 DECISIONES DE IMPLEMENTACIÓN QUE NO BLOQUEAN FREEZE
+### 24.3 DECISIONES DE IMPLEMENTACIÓN QUE NO BLOQUEAN BACKEND/WEB
 
 | Pendiente real | Cuándo debe cerrarse / límite que debe respetar |
 | --- | --- |
@@ -540,13 +551,49 @@ La ratificación de las propuestas de §19 y el cambio explícito de estado son 
 | Generador OpenAPI y cliente C#/TS concreto | Al implementar la primera API/consumidor; DTOs, strings decimales y semántica congelada deben preservarse |
 | Hosting/VPS, ubicación, dominio, SO y sizing | Antes del despliegue piloto; compatibles con Compose central/HTTPS y presupuesto operativo |
 | Proveedor/mecanismo concreto de autenticación, sesiones y credencial de terminal | Antes de implementar login/contexto/auth; debe encajar con db-4 y frontera P7 sin adelantar autorización ni agregar schema ajeno automáticamente |
-| SDK/patches backend, Npgsql y paquetes Web/tests, Node LTS, package manager/lockfile | Al crear proyectos, con versiones estables soportadas y builds reproducibles; no cambian las líneas candidatas por sí mismos |
+| SDK/patches backend, Npgsql y paquetes Web/tests, Node LTS, package manager/lockfile | Al crear proyectos, con versiones estables soportadas y builds reproducibles; no cambian las líneas de la baseline por sí mismos |
 | Tooling UI/hardware desktop, contenedores de tests y automatización | Tras framework y al implementar tests; no sustituye hardware real ni concurrencia PostgreSQL |
 | DTOs/rutas Command API de RETURN/ORDER/PURCHASE y demás queries/commands | Antes de implementar cada frontera; son hitos de contrato separados, no reapertura de T1–T4 ni blocker artificial del stack |
 | Librerías de hash/canonicalización, parsing/serialización y precisión decimal | Antes de implementar commands; respetar P5/P7, NUMERIC, rangos/intermedios y rounding de dominio |
-| Layout interno de proyectos/contratos/tests y servicio estático Web separado o assets en Caddy | Al materializar repo/deployment después del freeze; preservar separación Web/POS/backend y autoridades actuales |
+| Layout interno de proyectos/contratos/tests y servicio estático Web separado o assets en Caddy | Al materializar repo/deployment; preservar separación Web/POS/backend y autoridades actuales |
 | Navegadores mínimos, políticas de cache/refetch y timeouts/retries por command | Antes de piloto/consumidores; responsive desde diseño, sin autoridad local ni confirmaciones offline |
 | PAC/correo, XML/PDF, cifrado de CSD/secretos y contrato fiscal | Antes de implementar/validar facturación; responsabilidades del backend y límites operativos/fiscales existentes |
 | Backups/retención/destino, prueba de restauración, RPO/RTO, alertas y mantenimiento | Antes de producción, conforme a A1; volumen persistente no reemplaza recuperación validada |
 
-No hay pendientes nuevos de reglas funcionales, schema db-4, aislamiento/locks/idempotencia de T1–T4, Transport v0.1 ni CONFIRM_SALE API v0.1 creados por este micro-hito. Este documento termina como **BORRADOR CONTROLADO — NO FROZEN**, con los pendientes anteriores explícitos.
+No hay pendientes nuevos de reglas funcionales, schema db-4, aislamiento/locks/idempotencia de T1–T4, Transport v0.1 ni CONFIRM_SALE API v0.1 creados por este micro-hito. Estos diferidos tampoco impiden comenzar backend/Web.
+
+## 25. Implementación habilitada por esta baseline
+
+Orden conceptual de implementación:
+
+1. Bootstrap de solución/backend ASP.NET Core.
+2. Configuración base.
+3. Health endpoint.
+4. Npgsql y conexión a PostgreSQL 17.
+5. Infraestructura HTTP compartida.
+6. Infraestructura de errores y request-id.
+7. Idempotencia.
+8. Vertical slice de `CONFIRM_SALE`.
+9. Tests de integración y concurrencia.
+10. Bootstrap de Web Logística con React.
+11. Integración Web → API.
+
+Este orden implementa la baseline; no redefine ni reemplaza contratos de dominio, database, transacciones o API. No se requiere abrir más análisis generales de arquitectura antes del primer código salvo que durante la implementación aparezca un blocker técnico real. El siguiente micro-hito previsto es `chore(backend): bootstrap ASP.NET Core application`.
+
+### 25.1 Track Desktop en paralelo
+
+```text
+pos-hardware-inventory-v0.1.md
+    -> inventario real
+    -> POC WinUI 3 vs WPF
+    -> selección de framework
+    -> actualización posterior de tech-stack-v0.1.md
+```
+
+Este track no bloquea backend/Web. Hasta que concluya mediante un hito documental separado:
+
+```text
+POS_DESKTOP_FRAMEWORK = PENDING
+```
+
+Este documento termina como **BASELINE DE IMPLEMENTACIÓN PARCIALMENTE FROZEN — DESKTOP PENDING**. Este micro-hito solo ratifica decisiones: no crea código/proyectos, no modifica infraestructura, schema ni contratos, y no congela los patches exactos de dependencias.
