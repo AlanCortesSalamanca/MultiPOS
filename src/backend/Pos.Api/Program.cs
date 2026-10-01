@@ -1,4 +1,5 @@
 using Npgsql;
+using Pos.Api;
 
 const string RequestIdHeaderName = "X-Request-Id";
 
@@ -42,16 +43,12 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
 
         await context.Response.WriteAsJsonAsync(
-            new
-            {
-                error = new
-                {
-                    code = "INTERNAL_ERROR",
-                    message = "An internal error occurred.",
-                    category = "INTERNAL_TECHNICAL",
-                    retryable = false
-                }
-            },
+            new ApiErrorEnvelope(
+                new ApiError(
+                    "INTERNAL_ERROR",
+                    "An internal error occurred.",
+                    "INTERNAL_TECHNICAL",
+                    false)),
             context.RequestAborted);
     });
 });
