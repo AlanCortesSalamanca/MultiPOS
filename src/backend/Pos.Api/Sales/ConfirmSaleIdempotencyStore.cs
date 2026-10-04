@@ -9,6 +9,24 @@ internal sealed record ConfirmSaleIdempotencyPhaseAResult(
     ConfirmSaleIdempotencyDecision Decision,
     ConfirmSaleIdempotencySnapshot Snapshot);
 
+internal enum ConfirmSaleIdempotencyExecutionLockDecision
+{
+    // Exclusive continuation toward branch/barrier/history; not permission to create a sale.
+    ContinuationOwned,
+    KeyReused,
+    InProgress,
+    CompletedReplay,
+    FailedReplay,
+    ReconciliationRequired
+}
+
+internal sealed record ConfirmSaleIdempotencyExecutionLockResult(
+    long Id,
+    ConfirmSaleIdempotencyExecutionLockDecision Decision,
+    ConfirmSaleIdempotencySnapshot? Snapshot,
+    long? ResultEntityId,
+    bool RowLockHeld);
+
 internal sealed class ConfirmSaleIdempotencyStore
 {
     private const string OperationType = "CONFIRM_SALE";
@@ -46,6 +64,17 @@ internal sealed class ConfirmSaleIdempotencyStore
         WHERE business_id = @business_id
           AND operation_type = @operation_type
           AND idempotency_key = @idempotency_key;
+        """;
+
+    private const string LockForContinuationSql = """
+        SELECT id, request_hash, status::text, locked_until, result_entity_id,
+               transaction_timestamp() AS database_now
+        FROM idempotency_keys
+        WHERE id = @id
+          AND business_id = @business_id
+          AND operation_type = @operation_type
+          AND idempotency_key = @idempotency_key
+        FOR UPDATE NOWAIT;
         """;
 
     private readonly NpgsqlDataSource _dataSource;
@@ -113,6 +142,143 @@ internal sealed class ConfirmSaleIdempotencyStore
 
         await transaction.CommitAsync(cancellationToken);
         return result;
+    }
+
+    // Call immediately after BEGIN: idempotency must be the first persistent lock.
+    // The caller owns the connection/transaction and must retain this transaction for later phases.
+    internal async Task<ConfirmSaleIdempotencyExecutionLockResult> LockForContinuationAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long businessId,
+        string idempotencyKey,
+        string requestHash,
+        ConfirmSaleIdempotencyPhaseAResult phaseAResult,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(phaseAResult);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(businessId);
+        ArgumentException.ThrowIfNullOrEmpty(idempotencyKey);
+        ArgumentException.ThrowIfNullOrEmpty(requestHash);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(phaseAResult.Id);
+        ValidateContinuationDecision(phaseAResult.Decision);
+
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new ArgumentException(
+                "The confirm sale execution transaction must belong to the supplied connection.",
+                nameof(transaction));
+        }
+
+        if (transaction.IsolationLevel != IsolationLevel.ReadCommitted)
+        {
+            throw new ArgumentException(
+                "The confirm sale execution transaction requires READ COMMITTED isolation.",
+                nameof(transaction));
+        }
+
+        try
+        {
+            await using var command = new NpgsqlCommand(LockForContinuationSql, connection, transaction);
+            AddScopeParameters(command, businessId, idempotencyKey);
+            command.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, phaseAResult.Id);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "The reserved confirm sale idempotency key could not be locked and read.");
+            }
+
+            var snapshot = ReadSnapshot(reader);
+            var resultEntityId = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4);
+            var databaseNow = reader.GetFieldValue<DateTimeOffset>(5);
+            var decision = ClassifyLockedRow(
+                phaseAResult.Decision,
+                requestHash,
+                snapshot,
+                resultEntityId,
+                databaseNow);
+
+            // Disposing the command/reader does not release the caller's transaction row lock.
+            return new ConfirmSaleIdempotencyExecutionLockResult(
+                reader.GetInt64(0), decision, snapshot, resultEntityId, true);
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.LockNotAvailable)
+        {
+            // NOWAIT failure aborts the PostgreSQL transaction; the caller must end it, not continue.
+            // No authoritative snapshot was acquired under lock.
+            return new ConfirmSaleIdempotencyExecutionLockResult(
+                phaseAResult.Id, ConfirmSaleIdempotencyExecutionLockDecision.InProgress, null, null, false);
+        }
+    }
+
+    internal static ConfirmSaleIdempotencyExecutionLockDecision ClassifyLockedRow(
+        ConfirmSaleIdempotencyDecision phaseADecision,
+        string currentRequestHash,
+        ConfirmSaleIdempotencySnapshot snapshot,
+        long? resultEntityId,
+        DateTimeOffset databaseNow)
+    {
+        ValidateContinuationDecision(phaseADecision);
+        ArgumentException.ThrowIfNullOrEmpty(currentRequestHash);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (string.IsNullOrEmpty(snapshot.RequestHash))
+        {
+            throw new InvalidOperationException(
+                "The locked confirm sale idempotency snapshot requires a request hash.");
+        }
+
+        // Recheck the persisted hash before interpreting status, lease or result association.
+        if (!string.Equals(snapshot.RequestHash, currentRequestHash, StringComparison.Ordinal))
+        {
+            return ConfirmSaleIdempotencyExecutionLockDecision.KeyReused;
+        }
+
+        switch (snapshot.Status)
+        {
+            case ConfirmSaleIdempotencyStatus.Completed:
+                return ConfirmSaleIdempotencyExecutionLockDecision.CompletedReplay;
+
+            case ConfirmSaleIdempotencyStatus.Failed:
+                return ConfirmSaleIdempotencyExecutionLockDecision.FailedReplay;
+
+            case ConfirmSaleIdempotencyStatus.InProgress:
+                var lockedUntil = snapshot.LockedUntil ?? throw new InvalidOperationException(
+                    "An in-progress locked confirm sale idempotency snapshot requires a lease.");
+
+                if (phaseADecision == ConfirmSaleIdempotencyDecision.RecoveryCheckRequired &&
+                    lockedUntil > databaseNow)
+                {
+                    return ConfirmSaleIdempotencyExecutionLockDecision.InProgress;
+                }
+
+                if (resultEntityId is not null)
+                {
+                    return ConfirmSaleIdempotencyExecutionLockDecision.ReconciliationRequired;
+                }
+
+                // NewKey may retain its own lease. Recovery candidates require a non-current lease.
+                // Both paths still require branch/barrier/historical reconciliation before sale effects.
+                return ConfirmSaleIdempotencyExecutionLockDecision.ContinuationOwned;
+
+            default:
+                throw new InvalidOperationException(
+                    "The locked confirm sale idempotency snapshot contains an unsupported status.");
+        }
+    }
+
+    private static void ValidateContinuationDecision(ConfirmSaleIdempotencyDecision decision)
+    {
+        if (decision is not (ConfirmSaleIdempotencyDecision.NewKey or
+            ConfirmSaleIdempotencyDecision.RecoveryCheckRequired))
+        {
+            throw new ArgumentException(
+                "Confirm sale execution locking requires NewKey or RecoveryCheckRequired from Phase A.",
+                nameof(decision));
+        }
     }
 
     private static void AddScopeParameters(
