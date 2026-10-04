@@ -2,7 +2,7 @@
 
 Fuente funcional: `especificacion_maestra_pos_multisucursal_v0.5.md`.
 
-Referencia física: `docs/database/modelo-fisico-v0.5-db-2.md` y `database/schema-v0.5-db-2.sql` validado en PostgreSQL 17.11.
+Referencia física: `docs/database/modelo-fisico-v0.5-db-4.md` y `database/schema-v0.5-db-4.sql` validado en PostgreSQL 17.11.
 
 Este documento diseña conceptualmente la transacción `CONFIRMAR VENTA`. No define framework, API, DTOs, servicios, repositorios ni código.
 
@@ -11,11 +11,17 @@ Este documento diseña conceptualmente la transacción `CONFIRMAR VENTA`. No def
 - Estado: VALIDADO / CONGELADO
 - Versión: v0.1
 - Compatible con especificación maestra v0.5
-- Compatible con modelo físico PostgreSQL v0.5-db-2
+- Compatible con modelo físico PostgreSQL v0.5-db-4
 - Decisiones pendientes: 0
-- Implementación: todavía no iniciada
+- Implementación: parcial — FASE A1/A2 implementadas; FASE A3 y posteriores pendientes
 
 Cualquier cambio funcional posterior a este contrato requiere una nueva revisión/versionado del diseño transaccional.
+
+### Aclaración contractual autorizada para FASE A3 — 2026-10-04
+
+Esta revisión documental deliberada congela dentro de v0.1 el advisory-key mapping de `CONFIRM_SALE`, el punto de renovación de la lease de recovery y el formato interno `response_body` v1. Sustituye la indefinición anterior del mapping y la ubicación ambigua de la renovación entre FASE A y FASE B. Estas decisiones se contrastan con el modelo físico vigente db-4 y `docs/api/commands/confirm-sale-v0.1.md`.
+
+No cambia el orden de locks, la precedencia de hash/estado/lease, la reconciliación anterior a autorización, la API pública, los errores, la canonicalización ni el `request_hash`. Se conservan la lease de 30 segundos, la retención de 30 días y db-4 VALIDATED / FROZEN. Este cambio es exclusivamente documental y no implementa FASE A3.
 
 ## 1. Objetivo
 
@@ -237,33 +243,112 @@ La constraint única `(business_id, operation_type, idempotency_key)` sigue sien
 
 Separar esta reserva evita que un `ROLLBACK` de venta elimine también la fila `IN_PROGRESS`. Así `locked_until` funciona como lease persistente para detectar y recuperar procesos interrumpidos.
 
+FASE A (A1) reserva una key nueva, pero no renueva la lease de una fila existente. Con mismo hash y lease vencida solamente devuelve `RecoveryCheckRequired`: es un candidato a recovery, no permiso para reejecutar. FASE A hace `COMMIT` antes de iniciar la transacción operacional y la renovación elegible ocurre después de A2, según la regla de abajo.
+
 ### Barrera por `client_operation_id`
 
-Después de adquirir o resolver `idempotency_key`, la transacción debe adquirir una barrera PostgreSQL mediante transaction advisory lock para `(branch_id, client_operation_id)`, conceptualmente con `pg_advisory_xact_lock(...)`. No se fija todavía la función o hash exacto de implementación.
+La función frozen para `CONFIRM_SALE` es `pg_advisory_xact_lock(bigint)`. La barrera conceptual sigue siendo `(branch_id, client_operation_id)` y utiliza una sola clave PostgreSQL de 64 bits, derivada exactamente como se define a continuación.
+
+#### Advisory-key mapping v1
+
+Concatenar, en este orden y sin bytes adicionales:
+
+| Componente | Representación exacta |
+| --- | --- |
+| Domain separator | Bytes ASCII exactos de `POS:CONFIRM_SALE:CLIENT_OPERATION:v1`, sin BOM. |
+| Terminador del separator | Un único byte NUL `0x00`. |
+| `branch_id` | Signed Int64, 8 bytes, big-endian, two's-complement. Debe ser positivo; es el ID interno de la branch resuelta dentro del business confiable. |
+| Longitud de `client_operation_id` | UInt32, 4 bytes, big-endian, con la longitud **en bytes UTF-8** del valor. No contar chars ni runes. |
+| `client_operation_id` | Bytes UTF-8 exactos del valor recibido, sin BOM, trim, uppercase/lowercase, Unicode normalization ni otra transformación. |
+
+Preimagen completa:
+
+```text
+ASCII("POS:CONFIRM_SALE:CLIENT_OPERATION:v1")
+0x00
+Int64BE(branch_id)
+UInt32BE(utf8_byte_length(client_operation_id))
+UTF8(client_operation_id)
+```
+
+Las líneas representan concatenación binaria, no separadores de texto ni saltos de línea. Calcular `SHA-256(preimage)` y tomar `digest[0..8]`: los primeros 8 bytes, índices 0 a 7; el extremo 8 es exclusivo. Interpretar esos bytes como signed Int64 big-endian, two's-complement, y pasar el valor como parámetro `@lock_key BIGINT`:
+
+```sql
+SELECT pg_advisory_xact_lock(@lock_key);
+```
+
+No convertir la clave a decimal string ni aplicar `Math.Abs`. Los valores negativos, cero y `long.MinValue` son advisory lock keys válidas. Esta derivación es independiente del `request_hash` y no modifica su preimagen, canonicalización ni representación almacenada.
+
+La convención es estable, portable, reproducible e independiente del runtime y de una versión específica del hash interno de PostgreSQL. No se utilizan `GetHashCode()`, hashes process-local, `hashtext()` ni `hashtextextended()`, porque no definen esa convención binaria portable. Tampoco se utiliza MD5: la decisión frozen es SHA-256 con esta preimagen y conversión exactas.
+
+El mapping reduce un digest de 256 bits a 64 bits; una colisión teórica es posible. Una colisión puede serializar innecesariamente operaciones independientes, pero no autoriza duplicados, no sustituye idempotencia ni `UNIQUE(branch_id, client_operation_id)`, y no produce identidad compartida en `sales`. La constraint física `uq_sales_client_operation` de db-4 sigue siendo la defensa final.
+
+#### Semántica y secuencia de la barrera
+
+La barrera es transaction-scoped y bloqueante; la espera es intencional. No usar `pg_advisory_lock` session-level ni `pg_try_advisory_xact_lock`. El `NOWAIT` de A2 corresponde al row lock de idempotencia, no a esta barrera.
+
+La transacción operacional ya debe mantener el row lock de `idempotency_keys`. A3 conserva ese lock mientras resuelve identidad de branch, deriva la clave y adquiere la barrera; no lo libera entre pasos. Ambos locks pertenecen a la misma transacción. El advisory lock se libera automáticamente por `COMMIT`, `ROLLBACK` o terminación de la conexión/transacción; no hay commit interno ni una transacción separada para la barrera.
 
 El flujo es:
 
-1. adquirir o resolver `idempotency_key`;
-2. adquirir advisory lock determinista de `branch_id + client_operation_id`;
-3. consultar `sales(branch_id, client_operation_id)`;
-4. si existe, devolver la venta ya creada;
-5. si no existe, continuar.
+1. reservar/resolver `idempotency_key` en FASE A corta y hacer `COMMIT`;
+2. iniciar FASE B `READ COMMITTED`, adquirir/releer la fila y clasificar A2;
+3. renovar la lease solamente para recovery elegible, inmediatamente después de A2;
+4. resolver identidad de branch scoped al business confiable, sin adelantar validación ACTIVE ni autorización;
+5. derivar la clave según advisory-key mapping v1 y adquirir `pg_advisory_xact_lock(bigint)`;
+6. consultar la venta histórica exclusivamente por `sales(branch_id, client_operation_id)` con el valor exacto de `client_operation_id`;
+7. si existe, reconciliar la key actual y devolver el resultado histórico sin repetir efectos;
+8. solamente si no existe y no hay una asociación inconsistente en el camino `ReconciliationRequired`, continuar validaciones actuales y efectos.
 
-El advisory lock se libera automáticamente al `COMMIT` o `ROLLBACK`. La constraint `UNIQUE(branch_id, client_operation_id)` sigue siendo la última defensa en PostgreSQL.
-
-Si ya existe una venta con el mismo `client_operation_id` pero otra `idempotency_key`, se devuelve la venta existente. Si en el futuro, fuera del MVP, se quiere detectar reutilización de `client_operation_id` con payload distinto, será necesario persistir un fingerprint específico o adoptar otra política explícita.
+La venta histórica prevalece incluso si fue creada con otra `Idempotency-Key`. `sales` no almacena `request_hash`: no inferir igualdad ni diferencia de payload desde esa venta. La consulta histórica y la reconciliación permanecen antes de autorización.
 
 ### Si la clave está `IN_PROGRESS`
 
 - Para `CONFIRM_SALE` en MVP, `locked_until = now() + 30 segundos`.
 - Si `locked_until > now()`, devolver `SALE_IDEMPOTENCY_IN_PROGRESS`.
-- No mantener una petición HTTP esperando 30 segundos; el POS podrá reintentar posteriormente.
+- No mantener una petición HTTP esperando 30 segundos por la lease; el POS podrá reintentar posteriormente. Esto no cambia la espera intencional de la barrera advisory entre keys distintas.
 - Si otra transacción todavía bloquea la fila, considerarla todavía `IN_PROGRESS`.
 - Si `locked_until <= now()`, puede recuperarse únicamente si `request_hash` coincide, `result_entity_id IS NULL`, no existe ya una venta correspondiente a la operación y la fila puede adquirirse sin competir con una transacción activa.
-- Al recuperar, actualizar `locked_until = now() + 30 segundos` y continuar.
+- La renovación de recovery ocurre únicamente en el punto y bajo las condiciones definidos a continuación; no se realiza al clasificar el candidato en FASE A ni dentro de A2.
 - Si el `request_hash` no coincide, devolver `SALE_IDEMPOTENCY_KEY_REUSED`.
 
 La expiración de `locked_until` no significa que deba ejecutarse otra venta mientras una transacción original continúa activa. La implementación futura deberá usar locking de PostgreSQL para que solamente una ejecución posea efectivamente la fila.
+
+#### Punto exacto de renovación de recovery lease
+
+Renovar solamente cuando se cumplen simultáneamente:
+
+```text
+Phase A decision = RecoveryCheckRequired
+AND Phase A2 result = ContinuationOwned
+AND RowLockHeld = true
+```
+
+A2 relee bajo lock el mismo hash, `status='IN_PROGRESS'`, lease vencida y `result_entity_id IS NULL` antes de producir ese resultado para un candidato a recovery. `ContinuationOwned` permite continuar exclusivamente hacia branch/barrera/historia; la renovación no autoriza crear una venta ni omitir la verificación histórica.
+
+El UPDATE ocurre **inmediatamente después de A2 y antes de branch resolution/advisory barrier**, dentro de la misma transacción operacional que mantiene `idempotency_keys FOR UPDATE`. SQL conceptual parametrizado:
+
+```sql
+UPDATE idempotency_keys
+SET locked_until = transaction_timestamp() + interval '30 seconds'
+WHERE id = @id
+  AND business_id = @business_id
+  AND operation_type = 'CONFIRM_SALE';
+```
+
+La implementación futura debe verificar exactamente una fila afectada. No hace commit interno, no abre una transacción separada y no libera el row lock.
+
+No renovar para `NewKey`, `KeyReused`, `InProgress`, `CompletedReplay`, `FailedReplay` ni `ReconciliationRequired`. La key nueva conserva su lease de reserva, incluso si venció antes de que su caller original adquiriera A2; esa condición no cambia las reglas de ownership de A2.
+
+La lease no representa ownership. Mientras la transacción está activa, el ownership real sigue siendo el PostgreSQL row lock. La actualización de `locked_until` puede no ser visible externamente hasta `COMMIT`: otro recovery puede observar la lease anterior vencida en FASE A, intentar A2 mediante `FOR UPDATE NOWAIT`, encontrar la ejecución activa y recibir `InProgress` sin adquirir ownership.
+
+Si la transacción de recovery hace `ROLLBACK`, la renovación también hace rollback y continúa aplicando la lease anterior. No agregar heartbeat, background renewal ni ownership token.
+
+#### Camino `ReconciliationRequired`
+
+`ReconciliationRequired` significa que A2 encontró `IN_PROGRESS` con `result_entity_id IS NOT NULL` bajo row lock. No autoriza una nueva venta ni la renovación de lease; conserva las reglas de clasificación de A2 y no es sinónimo de recovery libre.
+
+La fase posterior debe verificar `result_entity_type`, `result_entity_id`, la identidad de la venta histórica y su correspondencia con la historia `(branch_id, client_operation_id)` después de la barrera. Para reconciliar, la asociación debe ser coherente con `result_entity_type='sales'` y el ID de esa venta histórica. Una asociación inconsistente o sin venta histórica correspondiente es una invariante interna rota, no un flujo normal de dominio ni permiso para crear una venta. No inventar reparación automática.
 
 ### Si la clave está `COMPLETED`
 
@@ -284,16 +369,17 @@ Después de reservar correctamente la clave, inicia la transacción operativa.
 
 Al inicio de FASE B:
 
-1. Bloquear la fila `idempotency_keys` correspondiente.
-2. Comprobar nuevamente `status`, `request_hash` y lease/propiedad de la ejecución.
-3. Continuar con advisory lock de `client_operation_id`, autorización, cotización, caja, catálogos, inventario, reposición, folio, venta, pagos, caja, auditoría y efectos operativos.
+1. Bloquear/releer `idempotency_keys` y clasificar A2 con precedencia hash, estado y lease/propiedad.
+2. Si es recovery elegible, renovar la lease inmediatamente después de A2 según la regla anterior.
+3. Resolver identidad de branch scoped al business confiable, derivar advisory key y adquirir la barrera transaccional.
+4. Buscar `sales(branch_id, client_operation_id)` y reconciliar si existe; solamente si no existe y no hay una asociación inconsistente `ReconciliationRequired`, continuar autorización, cotización, caja, catálogos, inventario, reposición, folio, venta, pagos, caja, auditoría y efectos operativos.
 
 Al final de la misma transacción operativa, actualizar `idempotency_keys`:
 
 - `status = 'COMPLETED'`;
 - `result_entity_type = 'sales'`;
 - `result_entity_id = sales.id`;
-- `response_body = respuesta mínima`;
+- `response_body = respuesta interna v1` definida abajo;
 - `error_code = NULL`;
 - `error_message = NULL`;
 - `locked_until = NULL`;
@@ -320,7 +406,7 @@ FASE C no contiene escrituras de negocio. No debe persistir stack traces, SQL in
 
 Para fallos técnicos no determinísticos, como pérdida de conexión, caída del proceso, timeout interno o error inesperado antes de conocer el resultado, no marcar automáticamente `FAILED`.
 
-La clave puede permanecer `IN_PROGRESS` hasta que expire `locked_until`. Después se aplica la recuperación segura descrita para `IN_PROGRESS` expirado. Antes de reejecutar, debe comprobarse si `sales(branch_id, client_operation_id)` ya existe. Si existe, la operación no debe repetirse; debe reconciliarse la `idempotency_key` con la venta existente actualizando la clave hacia `COMPLETED` con `result_entity_type='sales'`, `result_entity_id` y una `response_body` mínima, dentro de una transacción controlada.
+La clave puede permanecer `IN_PROGRESS` hasta que expire `locked_until`. Después se aplica la recuperación segura descrita para `IN_PROGRESS` expirado. Antes de reejecutar, debe comprobarse si `sales(branch_id, client_operation_id)` ya existe. Si existe, la operación no debe repetirse; debe reconciliarse la `idempotency_key` con la venta existente actualizando la clave hacia `COMPLETED` con `result_entity_type='sales'`, `result_entity_id` y una `response_body` interna v1, dentro de una transacción controlada.
 
 ### Retención y `response_body`
 
@@ -328,22 +414,39 @@ Para MVP:
 
 - `COMPLETED`: retener 30 días después de completar.
 - `FAILED`: retener 30 días después de fallar.
-- `IN_PROGRESS`: `locked_until` controla exclusividad operativa; `expires_at` no debe usarse como mecanismo de locking.
+- `IN_PROGRESS`: `locked_until` controla la lease; el row lock mantiene ownership transaccional y `expires_at` no debe usarse como mecanismo de locking.
 
 Una tarea de limpieza futura podrá eliminar registros con `expires_at < now()`, siempre que no estén asociados a una operación todavía activa. No se crea esa tarea en este diseño.
 
 Mientras una `idempotency_key` está `IN_PROGRESS`, `expires_at` puede permanecer `NULL`; `locked_until` es el mecanismo de lease. Al pasar a `COMPLETED` o `FAILED`, establecer `expires_at = now() + 30 días`. Esto no requiere cambios de schema porque `expires_at` ya admite `NULL`.
 
-`response_body` debe ser deliberadamente pequeño, con límite lógico de aplicación de 16 KiB. Debe contener solo una respuesta mínima útil para replay, por ejemplo:
+#### Internal `response_body` v1 de `CONFIRM_SALE`
 
-- `sale_public_id`;
-- `folio`;
-- `status`;
-- `total`;
-- `currency`;
-- `confirmed_at`.
+El formato interno mínimo persistido en `idempotency_keys.response_body` queda frozen para confirmación y reconciliación histórica. Es un objeto JSON con exactamente estas seis propiedades:
 
-No guardar en `response_body`: ticket completo, imágenes, XML, PDF, objetos enormes, secretos ni información innecesaria. Si la respuesta completa supera el límite, guardar solo información mínima y reconstruir el resto desde `result_entity_id`.
+```json
+{
+  "sale_public_id": "<uuid>",
+  "folio": "VEN-000001",
+  "status": "CONFIRMED",
+  "total": "11.60",
+  "currency": "MXN",
+  "confirmed_at": "2026-09-29T00:00:00Z"
+}
+```
+
+| Propiedad | Formato y autoridad |
+| --- | --- |
+| `sale_public_id` | UUID público persistido en `sales.public_id`, representado como JSON string. |
+| `folio` | JSON string con el folio persistido de la venta. |
+| `status` | JSON string literal `CONFIRMED`: resultado histórico del command, aunque el estado vivo posterior sea `PARTIALLY_RETURNED`, `RETURNED` o `CANCELLED`. |
+| `total` | JSON string decimal canónico scale 2 desde `sales.total`, con punto decimal y dos dígitos fraccionarios: `"0.00"`, `"11.60"`, `"1000.00"`. Sin JSON number, notación científica, formato localizado ni redondeo silencioso. |
+| `currency` | JSON string desde el valor persistido `sales.currency`; `MXN` en MVP. |
+| `confirmed_at` | JSON string desde `sales.confirmed_at`, RFC 3339 UTC con sufijo `Z`, sin offset local; preservar la precisión temporal autoritativa conforme a Transport v0.1. |
+
+`response_body` es almacenamiento idempotente interno, no por definición el envelope HTTP. El endpoint futuro construirá `{ "data": { ... } }` desde esta información/recurso persistido conforme al Command API, sin cambiar su contrato público. `v1` identifica esta convención documental y no agrega una propiedad de versión al objeto.
+
+Se conserva el máximo lógico de aplicación de **16 KiB**. No incluir `data`, `replayed`, `reconciled`, `idempotency_key`, `request_hash`, ID interno de sale, `business_id`, `branch_id`, `terminal_id`, `user_id`, customer, lines, payments, ticket, XML, PDF, imágenes, secretos ni propiedades adicionales. Una respuesta pública más amplia no debe ampliar este objeto interno; se reconstruye desde el recurso persistido cuando el contrato lo permita.
 
 ## 5. Orden definitivo de locks
 
@@ -361,52 +464,56 @@ El orden debe ser determinista para reducir deadlocks:
 
 Nota crítica: el folio se bloquea después de revalidar inventario para no mantener la secuencia bloqueada mientras se resuelven productos. Aun así, el folio se reserva antes de insertar `sales` y dentro de la misma transacción.
 
-## 6. Orden transaccional propuesto
+## 6. Orden transaccional
 
 ### FASE A - Reserva idempotente
 
 ### BEGIN
 
-1. Resolver o reservar `idempotency_key`.
+1. Resolver o reservar `idempotency_key`; comparar `request_hash` antes de interpretar estado o lease.
 2. Si está `COMPLETED`, devolver la venta existente sin entrar a FASE B.
 3. Si está `FAILED` con mismo `request_hash`, devolver el error de dominio almacenado sin entrar a FASE B.
 4. Si está `IN_PROGRESS` vigente, devolver `SALE_IDEMPOTENCY_IN_PROGRESS`.
-5. Si no existe o es `IN_PROGRESS` recuperable, dejar la fila en `IN_PROGRESS` con `locked_until = now() + 30 segundos`.
+5. Si no existe, reservar `IN_PROGRESS` con lease de 30 segundos y resultado `NewKey`. Si la fila existente tiene mismo hash y lease vencida, devolver `RecoveryCheckRequired` sin renovar ni asumir recovery autorizado.
 
 ### COMMIT
 
 ### FASE B - CONFIRMAR VENTA transaccional
 
-### BEGIN
+### BEGIN READ COMMITTED
 
-1. Bloquear y verificar la fila `idempotency_keys` reservada.
-2. Comprobar nuevamente `status`, `request_hash` y lease/propiedad de la ejecución.
-3. Adquirir advisory lock determinista por `(branch_id, client_operation_id)`.
-4. Verificar venta previa por `sales(branch_id, client_operation_id)`; si existe, no ejecutar efectos de negocio nuevamente, reconciliar idempotencia hacia `COMPLETED` y devolver la venta existente.
-5. Validar `branch`, `terminal`, `user`, permisos y pertenencia a sucursal.
-6. Bloquear y validar cotización si aplica.
-7. Bloquear y validar `cash_session` abierta de la misma sucursal y terminal.
-8. Resolver y validar cliente, lista de precios, productos, unidades, precios, descuentos e impuestos.
-9. Resolver métodos de pago y `replenishment_channel`.
-10. Rechazar mezcla de canales `CASH` / `TRANSFER` para MVP.
-11. Validar `SUM(sale_payments.amount) = sales.total` con comparación decimal exacta.
-12. Agregar cantidades por `product_id` para evitar doble descuento si el producto aparece en varias líneas.
-13. Bloquear `inventory_balances` por `branch_id` y productos agregados, en orden `product_id`.
-14. Revalidar stock suficiente y capturar `average_cost_base` como costo de salida.
-15. Bloquear o preparar `replenishment_positions` por `branch_id`, `product_id`, `channel` en orden estable.
-16. Bloquear `document_sequences` de `VEN` para la sucursal.
-17. Reservar folio incrementando `next_number`.
-18. Insertar `sales` con `status='CONFIRMED'`, folio, canal, snapshots y totales.
-19. Insertar `sale_items` con snapshots comerciales, `quantity_base` y `unit_cost_snapshot` desde `inventory_balances.average_cost_base`.
-20. Actualizar `inventory_balances.quantity_base = quantity_base - vendido_base`, conservar `average_cost_base` e incrementar `version`.
-21. Insertar `inventory_movements` tipo `SALE` con `quantity_delta_base` negativo, costo snapshot y `balance_after_base`.
-22. Insertar `sale_payments` con snapshot de método y canal.
-23. Insertar `cash_movements` solo para pagos cuyo `payment_methods.affects_cash = TRUE`; para efectivo usar `movement_type='SALE_CASH'` y `amount_delta > 0`.
-24. Actualizar o crear `replenishment_positions` incrementando `demand_qty_base`; no modificar `committed_qty_base`.
-25. Insertar un `replenishment_movements` por cada `sale_item`, con `reference_entity_type='sale_items'` y `reference_entity_id=sale_items.id`.
-26. Convertir cotización si aplica: actualizar `quotations.status='CONVERTED'` y `converted_sale_id=sale.id`.
-27. Insertar `audit_log` de venta confirmada.
-28. Marcar `idempotency_keys.status='COMPLETED'`, `result_entity_type='sales'`, `result_entity_id=sale.id`, `response_body` mínima, `error_code=NULL`, `error_message=NULL`, `locked_until=NULL` y `expires_at=now()+30 días`.
+1. Bloquear/releer la fila `idempotency_keys` reservada como primer lock persistente.
+2. Clasificar A2 comprobando nuevamente hash, estado y lease/propiedad en ese orden. Solo `ContinuationOwned` o `ReconciliationRequired` con `RowLockHeld=true` pueden continuar hacia la barrera/historia; no autorizan por sí mismos una venta nueva.
+3. Solamente si FASE A devolvió `RecoveryCheckRequired` y A2 devolvió `ContinuationOwned` con row lock retenido, renovar recovery lease inmediatamente, según §4.
+4. Resolver identidad de la branch objetivo dentro del business confiable, sin filtrar por ACTIVE ni adelantar autorización u otras validaciones actuales.
+5. Derivar la advisory key exacta de `(branch_id, client_operation_id)` conforme a §4.
+6. Adquirir `pg_advisory_xact_lock(bigint)` bloqueante en esta misma transacción.
+7. Buscar venta histórica por `sales(branch_id, client_operation_id)` después de la barrera.
+8. Si existe, reconciliar idempotencia hacia `COMPLETED` y devolver éxito histórico según la regla de abajo, sin ejecutar nuevamente efectos de negocio.
+9. Solamente si no existe venta histórica y no hay una asociación inconsistente `ReconciliationRequired`, continuar validando `branch`, `terminal`, `user`, permisos y pertenencia a sucursal. No aplicar authorization-before-reconciliation.
+10. Bloquear y validar cotización si aplica.
+11. Bloquear y validar `cash_session` abierta de la misma sucursal y terminal.
+12. Resolver y validar cliente, lista de precios, productos, unidades, precios, descuentos e impuestos.
+13. Resolver métodos de pago y `replenishment_channel`.
+14. Rechazar mezcla de canales `CASH` / `TRANSFER` para MVP.
+15. Validar `SUM(sale_payments.amount) = sales.total` con comparación decimal exacta.
+16. Agregar cantidades por `product_id` para evitar doble descuento si el producto aparece en varias líneas.
+17. Bloquear `inventory_balances` por `branch_id` y productos agregados, en orden `product_id`.
+18. Revalidar stock suficiente y capturar `average_cost_base` como costo de salida.
+19. Bloquear o preparar `replenishment_positions` por `branch_id`, `product_id`, `channel` en orden estable.
+20. Bloquear `document_sequences` de `VEN` para la sucursal.
+21. Reservar folio incrementando `next_number`.
+22. Insertar `sales` con `status='CONFIRMED'`, folio, canal, snapshots y totales.
+23. Insertar `sale_items` con snapshots comerciales, `quantity_base` y `unit_cost_snapshot` desde `inventory_balances.average_cost_base`.
+24. Actualizar `inventory_balances.quantity_base = quantity_base - vendido_base`, conservar `average_cost_base` e incrementar `version`.
+25. Insertar `inventory_movements` tipo `SALE` con `quantity_delta_base` negativo, costo snapshot y `balance_after_base`.
+26. Insertar `sale_payments` con snapshot de método y canal.
+27. Insertar `cash_movements` solo para pagos cuyo `payment_methods.affects_cash = TRUE`; para efectivo usar `movement_type='SALE_CASH'` y `amount_delta > 0`.
+28. Actualizar o crear `replenishment_positions` incrementando `demand_qty_base`; no modificar `committed_qty_base`.
+29. Insertar un `replenishment_movements` por cada `sale_item`, con `reference_entity_type='sale_items'` y `reference_entity_id=sale_items.id`.
+30. Convertir cotización si aplica: actualizar `quotations.status='CONVERTED'` y `converted_sale_id=sale.id`.
+31. Insertar `audit_log` de venta confirmada.
+32. Marcar `idempotency_keys.status='COMPLETED'`, `result_entity_type='sales'`, `result_entity_id=sale.id`, `response_body` interna v1, `error_code=NULL`, `error_message=NULL`, `locked_until=NULL` y `expires_at=now()+30 días`.
 
 ### COMMIT
 
@@ -425,6 +532,21 @@ Solo si FASE B falla por error de dominio determinístico:
 
 Si FASE B encuentra una venta existente para `(branch_id, client_operation_id)`:
 
+La reconciliación actualiza atómicamente la misma fila de idempotencia bloqueada con:
+
+```text
+status = COMPLETED
+result_entity_type = 'sales'
+result_entity_id = historical sale internal id
+response_body = internal response_body v1
+error_code = NULL
+error_message = NULL
+locked_until = NULL
+expires_at = transaction_timestamp() + interval '30 days'
+```
+
+Todo ocurre dentro de la misma transacción operacional que mantiene el idempotency row lock y el client-operation advisory lock. El caller es dueño de esa transacción: la fase de reconciliación no hace commit interno ni abre una transacción separada; el caller completa FASE B antes de emitir el éxito histórico.
+
 1. No ejecutar nuevamente efectos de negocio.
 2. No descontar inventario.
 3. No reservar otro folio.
@@ -433,9 +555,9 @@ Si FASE B encuentra una venta existente para `(branch_id, client_operation_id)`:
 6. No generar nueva reposición.
 7. Reconciliar la `idempotency_key` actual hacia `COMPLETED`.
 8. Asociarla con `result_entity_type='sales'` y `result_entity_id` de la venta existente.
-9. Guardar `response_body` mínima.
+9. Guardar `response_body` interna v1 y limpiar `error_code`, `error_message` y `locked_until`.
 10. Establecer `expires_at = now() + 30 días`.
-11. Hacer `COMMIT`.
+11. El caller hace `COMMIT` de la misma FASE B, sin liberar los locks antes de completar la reconciliación.
 12. Devolver la venta existente.
 
 Puede existir más de una `idempotency_key` `COMPLETED` apuntando a la misma venta como resultado de reconciliación. Eso no significa que existan ventas duplicadas.
