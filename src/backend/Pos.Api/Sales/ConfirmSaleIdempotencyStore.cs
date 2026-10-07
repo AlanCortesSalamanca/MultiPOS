@@ -77,6 +77,14 @@ internal sealed class ConfirmSaleIdempotencyStore
         FOR UPDATE NOWAIT;
         """;
 
+    private const string RenewRecoveryLeaseSql = """
+        UPDATE idempotency_keys
+        SET locked_until = transaction_timestamp() + interval '30 seconds'
+        WHERE id = @id
+          AND business_id = @business_id
+          AND operation_type = @operation_type;
+        """;
+
     private readonly NpgsqlDataSource _dataSource;
 
     internal ConfirmSaleIdempotencyStore(NpgsqlDataSource dataSource)
@@ -211,6 +219,69 @@ internal sealed class ConfirmSaleIdempotencyStore
             // No authoritative snapshot was acquired under lock.
             return new ConfirmSaleIdempotencyExecutionLockResult(
                 phaseAResult.Id, ConfirmSaleIdempotencyExecutionLockDecision.InProgress, null, null, false);
+        }
+    }
+
+    // Call immediately after eligible A2, on the same caller-owned transaction retaining its row lock.
+    internal async Task RenewRecoveryLeaseAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long businessId,
+        ConfirmSaleIdempotencyPhaseAResult phaseAResult,
+        ConfirmSaleIdempotencyExecutionLockResult executionLockResult,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(businessId);
+        ValidateRecoveryLeaseRenewal(phaseAResult, executionLockResult);
+
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new ArgumentException(
+                "The confirm sale execution transaction must belong to the supplied connection.",
+                nameof(transaction));
+        }
+
+        if (transaction.IsolationLevel != IsolationLevel.ReadCommitted)
+        {
+            throw new ArgumentException(
+                "The confirm sale execution transaction requires READ COMMITTED isolation.",
+                nameof(transaction));
+        }
+
+        await using var command = new NpgsqlCommand(RenewRecoveryLeaseSql, connection, transaction);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, executionLockResult.Id);
+        command.Parameters.AddWithValue("business_id", NpgsqlDbType.Bigint, businessId);
+        command.Parameters.AddWithValue("operation_type", NpgsqlDbType.Text, OperationType);
+
+        var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (affectedRows != 1)
+        {
+            throw new InvalidOperationException(
+                "Confirm sale recovery lease renewal must affect exactly one idempotency key.");
+        }
+    }
+
+    internal static void ValidateRecoveryLeaseRenewal(
+        ConfirmSaleIdempotencyPhaseAResult phaseAResult,
+        ConfirmSaleIdempotencyExecutionLockResult executionLockResult)
+    {
+        ArgumentNullException.ThrowIfNull(phaseAResult);
+        ArgumentNullException.ThrowIfNull(executionLockResult);
+
+        if (phaseAResult.Decision != ConfirmSaleIdempotencyDecision.RecoveryCheckRequired ||
+            executionLockResult.Decision != ConfirmSaleIdempotencyExecutionLockDecision.ContinuationOwned ||
+            !executionLockResult.RowLockHeld)
+        {
+            throw new InvalidOperationException(
+                "Confirm sale recovery lease renewal requires RecoveryCheckRequired, ContinuationOwned and a held row lock.");
+        }
+
+        if (phaseAResult.Id <= 0 || executionLockResult.Id != phaseAResult.Id)
+        {
+            throw new InvalidOperationException(
+                "Confirm sale recovery lease renewal requires the same reserved and locked idempotency key.");
         }
     }
 
