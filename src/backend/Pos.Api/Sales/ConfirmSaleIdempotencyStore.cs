@@ -24,6 +24,7 @@ internal sealed record ConfirmSaleIdempotencyExecutionLockResult(
     long Id,
     ConfirmSaleIdempotencyExecutionLockDecision Decision,
     ConfirmSaleIdempotencySnapshot? Snapshot,
+    string? ResultEntityType,
     long? ResultEntityId,
     bool RowLockHeld);
 
@@ -67,7 +68,8 @@ internal sealed class ConfirmSaleIdempotencyStore
         """;
 
     private const string LockForContinuationSql = """
-        SELECT id, request_hash, status::text, locked_until, result_entity_id,
+        SELECT id, request_hash, status::text, locked_until,
+               result_entity_type, result_entity_id,
                transaction_timestamp() AS database_now
         FROM idempotency_keys
         WHERE id = @id
@@ -200,8 +202,9 @@ internal sealed class ConfirmSaleIdempotencyStore
             }
 
             var snapshot = ReadSnapshot(reader);
-            var resultEntityId = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4);
-            var databaseNow = reader.GetFieldValue<DateTimeOffset>(5);
+            var resultEntityType = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var resultEntityId = reader.IsDBNull(5) ? (long?)null : reader.GetInt64(5);
+            var databaseNow = reader.GetFieldValue<DateTimeOffset>(6);
             var decision = ClassifyLockedRow(
                 phaseAResult.Decision,
                 requestHash,
@@ -211,14 +214,14 @@ internal sealed class ConfirmSaleIdempotencyStore
 
             // Disposing the command/reader does not release the caller's transaction row lock.
             return new ConfirmSaleIdempotencyExecutionLockResult(
-                reader.GetInt64(0), decision, snapshot, resultEntityId, true);
+                reader.GetInt64(0), decision, snapshot, resultEntityType, resultEntityId, true);
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.LockNotAvailable)
         {
             // NOWAIT failure aborts the PostgreSQL transaction; the caller must end it, not continue.
             // No authoritative snapshot was acquired under lock.
             return new ConfirmSaleIdempotencyExecutionLockResult(
-                phaseAResult.Id, ConfirmSaleIdempotencyExecutionLockDecision.InProgress, null, null, false);
+                phaseAResult.Id, ConfirmSaleIdempotencyExecutionLockDecision.InProgress, null, null, null, false);
         }
     }
 
