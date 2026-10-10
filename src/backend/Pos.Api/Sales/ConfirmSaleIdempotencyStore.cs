@@ -87,6 +87,22 @@ internal sealed class ConfirmSaleIdempotencyStore
           AND operation_type = @operation_type;
         """;
 
+    private const string CompleteReconciliationSql = """
+        UPDATE idempotency_keys
+        SET status = 'COMPLETED',
+            result_entity_type = 'sales',
+            result_entity_id = @result_entity_id,
+            response_body = @response_body,
+            error_code = NULL,
+            error_message = NULL,
+            locked_until = NULL,
+            expires_at = transaction_timestamp() + interval '30 days'
+        WHERE id = @id
+          AND business_id = @business_id
+          AND operation_type = @operation_type
+          AND status = 'IN_PROGRESS';
+        """;
+
     private readonly NpgsqlDataSource _dataSource;
 
     internal ConfirmSaleIdempotencyStore(NpgsqlDataSource dataSource)
@@ -263,6 +279,59 @@ internal sealed class ConfirmSaleIdempotencyStore
         {
             throw new InvalidOperationException(
                 "Confirm sale recovery lease renewal must affect exactly one idempotency key.");
+        }
+    }
+
+    // The caller retains A2/A3 locks and owns the connection/transaction through completion.
+    internal async Task CompleteReconciliationAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long businessId,
+        ConfirmSaleIdempotencyExecutionLockResult executionLockResult,
+        ConfirmSaleHistoricalSale historicalSale,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(businessId);
+        ArgumentNullException.ThrowIfNull(executionLockResult);
+        ArgumentNullException.ThrowIfNull(historicalSale);
+
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new ArgumentException(
+                "The confirm sale execution transaction must belong to the supplied connection.",
+                nameof(transaction));
+        }
+
+        if (transaction.IsolationLevel != IsolationLevel.ReadCommitted)
+        {
+            throw new ArgumentException(
+                "The confirm sale execution transaction requires READ COMMITTED isolation.",
+                nameof(transaction));
+        }
+
+        if (ConfirmSaleReconciliationResolver.Resolve(executionLockResult, historicalSale) !=
+            ConfirmSaleReconciliationDecision.ReconcileHistoricalSale)
+        {
+            throw new InvalidOperationException(
+                "Confirm sale reconciliation completion requires a validated historical sale.");
+        }
+
+        var responseBody = ConfirmSaleReconciliationResponseBodySerializer.Serialize(historicalSale);
+
+        await using var command = new NpgsqlCommand(CompleteReconciliationSql, connection, transaction);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, executionLockResult.Id);
+        command.Parameters.AddWithValue("business_id", NpgsqlDbType.Bigint, businessId);
+        command.Parameters.AddWithValue("operation_type", NpgsqlDbType.Text, OperationType);
+        command.Parameters.AddWithValue("result_entity_id", NpgsqlDbType.Bigint, historicalSale.Id);
+        command.Parameters.AddWithValue("response_body", NpgsqlDbType.Jsonb, responseBody);
+
+        var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (affectedRows != 1)
+        {
+            throw new InvalidOperationException(
+                "Confirm sale reconciliation completion must affect exactly one idempotency key.");
         }
     }
 
